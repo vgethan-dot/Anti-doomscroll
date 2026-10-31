@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="service_desc">AntiScroll détecte chaque nouvelle vidéo dans TikTok, Reels, Shorts, Spotlight et Facebook Reels, et demande ton code. Il affiche aussi l\'écran noir pendant tes objectifs. Aucune donnée n\'est envoyée ailleurs que sur ton serveur.</string>
+</resources>

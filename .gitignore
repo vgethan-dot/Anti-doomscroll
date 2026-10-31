@@ -1,0 +1,8 @@
+__pycache__/
+.venv/
+*.pyc
+build/
+dist/
+.gradle/
+local.properties
+server/data/

@@ -1,0 +1,55 @@
+# Construit automatiquement : l'APK Android, le .exe Windows et l'exécutable Linux.
+# Sur GitHub : onglet "Actions" -> "Construire AntiScroll" -> "Run workflow",
+# puis télécharge les fichiers dans "Artifacts" en bas de la page.
+name: Construire AntiScroll
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "17" }
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with: { gradle-version: "8.9" }
+      - name: Compiler l'APK
+        working-directory: android
+        run: gradle assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AntiScroll-android
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+
+  pc:
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-22.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Installer les dépendances
+        run: pip install -r pc/requirements.txt pyinstaller
+      - name: Construire l'exécutable
+        run: pyinstaller --onefile --windowed --name AntiScroll --paths server --hidden-import server pc/antiscroll.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AntiScroll-${{ runner.os }}
+          path: dist/*
+
+  firefox:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Empaqueter l'extension
+        run: cd firefox && zip -r ../antiscroll-firefox.xpi .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AntiScroll-firefox
+          path: antiscroll-firefox.xpi

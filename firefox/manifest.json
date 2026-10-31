@@ -1,0 +1,20 @@
+{
+  "manifest_version": 2,
+  "name": "AntiScroll",
+  "version": "1.0.0",
+  "description": "Demande ton code à chaque vidéo sur Shorts, Reels, TikTok, Spotlight...",
+  "browser_specific_settings": {
+    "gecko": { "id": "antiscroll@ethan.local", "strict_min_version": "115.0" }
+  },
+  "permissions": ["storage", "http://127.0.0.1/*"],
+  "background": { "scripts": ["background.js"] },
+  "browser_action": { "default_title": "AntiScroll", "default_popup": "popup.html" },
+  "content_scripts": [{
+    "matches": [
+      "*://*.youtube.com/*", "*://*.instagram.com/*", "*://*.tiktok.com/*",
+      "*://*.snapchat.com/*", "*://*.facebook.com/*"
+    ],
+    "js": ["content.js"],
+    "run_at": "document_idle"
+  }]
+}
