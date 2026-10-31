@@ -65,3 +65,32 @@ jobs:
         with:
           name: AntiScroll-firefox
           path: antiscroll-firefox.xpi
+
+  # À chaque mise à jour de main : publie une "Release" avec des liens directs
+  # (faciles à télécharger depuis un téléphone, sans compte GitHub).
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [android, pc, firefox]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: art }
+      - name: Renommer les fichiers
+        run: |
+          mkdir out
+          cp art/AntiScroll-android/app-debug.apk out/AntiScroll.apk
+          cp art/AntiScroll-Windows/AntiScroll.exe out/AntiScroll-Windows.exe
+          cp art/AntiScroll-Linux/AntiScroll out/AntiScroll-Linux
+          cp art/AntiScroll-firefox/antiscroll-firefox.xpi out/antiscroll-firefox.xpi
+          ls -la out
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: AntiScroll 1.0.${{ github.run_number }}
+          make_latest: "true"
+          body: |
+            Lien direct pour le téléphone (toujours la dernière version) :
+            https://github.com/${{ github.repository }}/releases/latest/download/AntiScroll.apk
+          files: out/*
