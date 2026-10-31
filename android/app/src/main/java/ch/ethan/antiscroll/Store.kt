@@ -70,18 +70,9 @@ val TARGET_APPS = linkedMapOf(
     "Facebook (Reels)" to listOf("com.facebook.katana"),
 )
 
+/** Tout est stocké sur le téléphone (aucun serveur). */
 class Store(ctx: Context) {
     private val p = ctx.getSharedPreferences("antiscroll", Context.MODE_PRIVATE)
-
-    var serverUrl: String
-        get() = p.getString("server_url", "") ?: ""
-        set(v) = p.edit().putString("server_url", v).apply()
-    var token: String
-        get() = p.getString("token", "") ?: ""
-        set(v) = p.edit().putString("token", v).apply()
-    var username: String
-        get() = p.getString("username", "") ?: ""
-        set(v) = p.edit().putString("username", v).apply()
 
     var disabledApps: Set<String>
         get() = p.getStringSet("disabled_apps", emptySet()) ?: emptySet()
@@ -128,5 +119,82 @@ class Store(ctx: Context) {
             if (sec in 1..withinMin * 60) res.add(Triple(o, sec, k))
         }
         return res
+    }
+}
+
+class ConfigFileException(msg: String) : Exception(msg)
+
+/**
+ * Export / import de la config dans un fichier .json, pour la copier sur un
+ * autre appareil (même format que l'app PC). Le code n'est jamais écrit en
+ * clair : seulement son empreinte (sel + hash).
+ */
+object ConfigFile {
+    private const val APP = "antiscroll"
+    private const val VERSION = 1
+
+    fun export(store: Store): String {
+        val c = store.config
+        val cfg = JSONObject()
+            .put("unlock", c.optJSONObject("unlock") ?: JSONObject.NULL)
+            .put("objectives", c.optJSONArray("objectives") ?: JSONArray())
+            .put("settings", c.optJSONObject("settings") ?: JSONObject().put("app_recheck_min", 3))
+        return JSONObject()
+            .put("app", APP).put("version", VERSION)
+            .put("exported_at", System.currentTimeMillis())
+            .put("config", cfg)
+            .put("android_disabled_apps", JSONArray(store.disabledApps.toList()))
+            .toString(2)
+    }
+
+    /** Vérifie le fichier. Renvoie (config, apps désactivées ou null). */
+    fun parse(text: String): Pair<JSONObject, Set<String>?> {
+        val data = runCatching { JSONObject(text) }.getOrNull()
+        if (data == null || data.optString("app") != APP) throw ConfigFileException("Ce fichier n'est pas une config AntiScroll")
+        if (data.optInt("version", 0) > VERSION) throw ConfigFileException("Config créée par une version plus récente d'AntiScroll")
+        val cfg = data.optJSONObject("config") ?: throw ConfigFileException("Config vide ou abîmée")
+
+        val objs = JSONArray()
+        val arr = cfg.optJSONArray("objectives") ?: JSONArray()
+        for (i in 0 until arr.length()) {
+            val o = try {
+                val j = arr.getJSONObject(i)
+                val (h, m) = j.getString("start").split(":").map { it.trim().toInt() }
+                require(h in 0..23 && m in 0..59)
+                val dur = j.getInt("duration")
+                require(dur in 1..1440)
+                val d = j.optJSONArray("days") ?: JSONArray()
+                val days = (0 until d.length()).map { d.getInt(it) }.filter { it in 0..6 }.distinct().sorted()
+                Objective(j.optString("id").ifBlank { java.util.UUID.randomUUID().toString().take(12) },
+                    j.optString("title").ifBlank { "Objectif" }, "%02d:%02d".format(h, m), dur, days)
+            } catch (e: Exception) {
+                throw ConfigFileException("Un objectif du fichier est abîmé")
+            }
+            objs.put(o.toJson())
+        }
+
+        val unlock = cfg.optJSONObject("unlock")?.let { u ->
+            try {
+                val salt = u.getString("salt"); val hash = u.getString("hash")
+                val iter = u.optInt("iter", Crypto.ITER)
+                require(salt.matches(Regex("[0-9a-fA-F]+")) && salt.length % 2 == 0)
+                require(hash.matches(Regex("[0-9a-fA-F]{64}")))
+                require(iter >= 1000)
+                JSONObject().put("salt", salt).put("hash", hash).put("iter", iter)
+            } catch (e: Exception) {
+                throw ConfigFileException("Code invalide dans le fichier")
+            }
+        }
+        val recheck = (cfg.optJSONObject("settings")?.optInt("app_recheck_min", 3) ?: 3).coerceIn(1, 120)
+
+        val config = JSONObject()
+            .put("updated_at", System.currentTimeMillis())
+            .put("unlock", unlock ?: JSONObject.NULL)
+            .put("objectives", objs)
+            .put("settings", JSONObject().put("app_recheck_min", recheck))
+        val disabled = data.optJSONArray("android_disabled_apps")?.let { a ->
+            (0 until a.length()).map { a.getString(it) }.filter { it in TARGET_APPS.keys }.toSet()
+        }
+        return config to disabled
     }
 }

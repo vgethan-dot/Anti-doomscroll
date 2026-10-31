@@ -9,7 +9,8 @@ AntiScroll pour PC (Ubuntu + Windows).
 - Apps installées (TikTok, Instagram...) : écran noir + code, redemandé
   toutes les X minutes.
 - Pont local pour l'extension Firefox (code à chaque vidéo).
-- Comptes + synchro avec le serveur (qui peut tourner sur ce PC).
+- Tout est stocké sur ce PC (aucun serveur). Bouton Exporter / Importer
+  pour copier la config (code + objectifs) sur un autre appareil.
 - Mode dev (Dev / Dev Roblox) : écran vraiment éteint, PC qui ne se met pas
   en veille, pour que Claude puisse continuer à bosser dessus.
 """
@@ -28,7 +29,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "server"))
 
 import core  # noqa: E402
 import devmode  # noqa: E402
@@ -427,15 +427,12 @@ def start_bridge(app):
 class App:
     def __init__(self, minimized=False):
         self.state = core.State()
-        self.api = core.Api(self.state)
         self.warn = core.WarningTracker()
         self.unlocked_blocks = set()    # occurrences d'objectifs débloquées avec le code
         self.app_ok_until = 0.0         # apps installées autorisées jusqu'à ce moment
         self.overlay = None
         self.overlay_kind = None
         self.events = queue.Queue()     # messages des threads vers l'interface
-        self.server_httpd = None
-        self.last_sync = 0
         # Mode dev
         self.dev_mode = None            # None, "dev" ou "roblox"
         self.dev_sleep = devmode.SleepBlocker()
@@ -454,8 +451,6 @@ class App:
         self.root.protocol("WM_DELETE_WINDOW", self.root.iconify)  # fermer = réduire
         self.build_ui()
 
-        if self.state.data.get("host_server"):
-            self.start_server()
         self.bridge_ok = start_bridge(self)
         self.refresh_status()
 
@@ -480,7 +475,7 @@ class App:
         nb.pack(fill="both", expand=True, padx=14, pady=(8, 8))
         self.tab_objectives(nb)
         self.tab_code(nb)
-        self.tab_account(nb)
+        self.tab_transfer(nb)
         self.tab_apps(nb)
         self.tab_dev(nb)
 
@@ -545,53 +540,26 @@ class App:
         ttk.Button(f, text="Enregistrer", style="Accent.TButton", command=self.save_recheck).pack(anchor="w")
         self.refresh_code_info()
 
-    def tab_account(self, nb):
+    def tab_transfer(self, nb):
         f = ttk.Frame(nb, padding=18, style="Card.TFrame")
-        nb.add(f, text="Compte")
-        self.host_var = tk.BooleanVar(value=self.state.data.get("host_server", False))
-        ttk.Checkbutton(f, style="Card.TCheckbutton", text="Ce PC héberge le serveur (les comptes sont stockés ici)",
-                        variable=self.host_var, command=self.toggle_host).pack(anchor="w")
-        self.host_info = ttk.Label(f, style="Card.TLabel", text="", foreground=C["muted"])
-        self.host_info.pack(anchor="w", pady=(0, 10))
-
-        ttk.Label(f, style="Card.TLabel", text="Adresse du serveur (ex. http://100.x.y.z:47800)").pack(anchor="w")
-        self.srv = ttk.Entry(f, width=40)
-        self.srv.insert(0, self.state.data.get("server_url", ""))
-        self.srv.pack(anchor="w", pady=(0, 10))
-
-        self.acc_box = ttk.Frame(f, style="Card.TFrame")
-        self.acc_box.pack(fill="x")
-        self.build_account_box()
-
-    def build_account_box(self):
-        for w in self.acc_box.winfo_children():
-            w.destroy()
-        f = self.acc_box
-        if self.state.data.get("token"):
-            ttk.Label(f, style="CardTitle.TLabel",
-                      text=f"Connecté : {self.state.data['username']}").pack(anchor="w", pady=(0, 8))
-            row = ttk.Frame(f, style="Card.TFrame")
-            row.pack(anchor="w")
-            ttk.Button(row, text="Synchroniser", style="Accent.TButton", command=self.sync_now).pack(side="left")
-            ttk.Button(row, text="Changer de pseudo", command=self.change_username).pack(side="left", padx=4)
-            ttk.Button(row, text="Changer le mot de passe", command=self.change_password).pack(side="left")
-            row2 = ttk.Frame(f, style="Card.TFrame")
-            row2.pack(anchor="w", pady=8)
-            ttk.Button(row2, text="Se déconnecter", command=self.logout).pack(side="left")
-            ttk.Button(row2, text="Supprimer le compte", style="Danger.TButton", command=self.delete_account).pack(side="left", padx=4)
-        else:
-            ttk.Label(f, style="Card.TLabel", text="Pseudo").pack(anchor="w")
-            self.u = ttk.Entry(f, width=24)
-            self.u.pack(anchor="w")
-            ttk.Label(f, style="Card.TLabel", text="Mot de passe du compte").pack(anchor="w")
-            self.p = ttk.Entry(f, width=24, show="•")
-            self.p.pack(anchor="w")
-            row = ttk.Frame(f, style="Card.TFrame")
-            row.pack(anchor="w", pady=8)
-            ttk.Button(row, text="Se connecter", style="Accent.TButton", command=lambda: self.auth("login")).pack(side="left")
-            ttk.Button(row, text="Créer un compte", command=lambda: self.auth("register")).pack(side="left", padx=6)
-            ttk.Label(f, style="Card.TLabel", text="Sans compte, l'app marche quand même (sans synchro).",
-                      foreground=C["muted"]).pack(anchor="w")
+        nb.add(f, text="Config")
+        ttk.Label(f, style="CardTitle.TLabel", text="Tout reste sur ce PC").pack(anchor="w")
+        ttk.Label(f, style="Card.TLabel", justify="left", foreground=C["muted"],
+                  text="Pas de compte, pas de serveur, pas de lien avec tes autres appareils.\n"
+                       "Pour avoir les mêmes réglages ailleurs (autre PC, téléphone) :\n"
+                       "1. Exporter la config ici  →  un fichier antiscroll-config.json\n"
+                       "2. L'envoyer sur l'autre appareil (clé USB, mail, Drive…)\n"
+                       "3. Importer la config là-bas").pack(anchor="w", pady=(4, 12))
+        row = ttk.Frame(f, style="Card.TFrame")
+        row.pack(anchor="w")
+        ttk.Button(row, text="Exporter la config", style="Accent.TButton",
+                   command=self.export_config).pack(side="left")
+        ttk.Button(row, text="Importer une config (code requis)",
+                   command=self.import_config).pack(side="left", padx=6)
+        ttk.Label(f, style="Card.TLabel", justify="left", foreground=C["muted"],
+                  text="Le fichier contient ton code sous forme chiffrée (jamais en clair),\n"
+                       "tes objectifs et la liste des apps surveillées.\n"
+                       "Importer remplace la config de ce PC : ton code actuel est demandé.").pack(anchor="w", pady=(12, 0))
 
     def tab_apps(self, nb):
         f = ttk.Frame(nb, padding=18, style="Card.TFrame")
@@ -795,7 +763,6 @@ class App:
         self.state.config.setdefault("objectives", []).append(o)
         self.state.touch_config()
         self.refresh_objectives()
-        self.sync_bg()
 
     def del_objective(self):
         sel = self.tree.selection()
@@ -805,7 +772,6 @@ class App:
                                            if o["id"] not in sel]
         self.state.touch_config()
         self.refresh_objectives()
-        self.sync_bg()
 
     def set_code(self):
         if not self.ask_code("Code actuel :"):
@@ -822,7 +788,6 @@ class App:
         self.state.config["unlock"] = core.make_unlock(c1)
         self.state.touch_config()
         self.refresh_code_info()
-        self.sync_bg()
 
     def refresh_code_info(self):
         self.code_info.config(text="Code : défini ✔" if self.state.config.get("unlock")
@@ -835,7 +800,6 @@ class App:
             return
         self.state.config.setdefault("settings", {})["app_recheck_min"] = v
         self.state.touch_config()
-        self.sync_bg()
 
     def save_apps(self):
         names = [l.strip().lower() for l in self.apps_txt.get("1.0", "end").splitlines() if l.strip()]
@@ -843,109 +807,49 @@ class App:
             self.state.data["watched_apps"] = names
             self.state.save()
 
-    def toggle_host(self):
-        on = self.host_var.get()
-        with self.state.lock:
-            self.state.data["host_server"] = on
-            self.state.save()
-        if on:
-            self.start_server()
-            if not self.srv.get().strip():
-                self.srv.insert(0, "http://127.0.0.1:47800")
-        elif self.server_httpd:
-            self.server_httpd.shutdown()
-            self.server_httpd = None
-        self.refresh_status()
+    def export_config(self):
+        path = filedialog.asksaveasfilename(
+            parent=self.root, title="Exporter la config", defaultextension=".json",
+            initialfile="antiscroll-config.json", filetypes=[("Config AntiScroll", "*.json")])
+        if not path:
+            return
+        data = core.export_config(self.state.config, self.state.data.get("watched_apps"))
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+        except OSError as e:
+            return messagebox.showerror("AntiScroll", f"Impossible d'écrire le fichier : {e}", parent=self.root)
+        messagebox.showinfo("AntiScroll", f"Config exportée ✔\n{path}", parent=self.root)
 
-    def start_server(self):
-        if self.server_httpd:
+    def import_config(self):
+        path = filedialog.askopenfilename(
+            parent=self.root, title="Importer une config",
+            filetypes=[("Config AntiScroll", "*.json"), ("Tous les fichiers", "*")])
+        if not path:
             return
         try:
-            import server
-            data = os.path.join(core.APP_DIR, "server_data")
-            self.server_httpd = server.run(data_dir=data)
-            threading.Thread(target=self.server_httpd.serve_forever, daemon=True).start()
-            self.host_info.config(text=f"Serveur actif (port 47800) - comptes dans {data}")
-        except Exception as e:
-            self.host_info.config(text=f"Impossible de lancer le serveur : {e}")
-
-    def save_server_url(self):
-        url = self.srv.get().strip().rstrip("/")
-        if url and not url.startswith("http"):
-            url = "http://" + url
-        with self.state.lock:
-            self.state.data["server_url"] = url
-            self.state.save()
-
-    def auth(self, kind):
-        self.save_server_url()
-        try:
-            (self.api.login if kind == "login" else self.api.register)(self.u.get(), self.p.get())
-        except core.ApiError as e:
+            with open(path, "r", encoding="utf-8") as f:
+                config, watched = core.parse_import(f.read())
+        except (OSError, core.ConfigFileError) as e:
             return messagebox.showerror("AntiScroll", str(e), parent=self.root)
-        self.after_sync()
-        self.build_account_box()
-
-    def sync_now(self):
-        self.save_server_url()
-        try:
-            self.api.sync()
-            self.after_sync()
-            messagebox.showinfo("AntiScroll", "Synchronisé ✔", parent=self.root)
-        except core.ApiError as e:
-            messagebox.showerror("AntiScroll", str(e), parent=self.root)
-
-    def sync_bg(self):
-        def run():
-            try:
-                if self.api.sync():
-                    self.events.put(("synced", None))
-            except core.ApiError:
-                pass
-        self.last_sync = time.time()
-        threading.Thread(target=run, daemon=True).start()
-
-    def after_sync(self):
+        # Sinon on pourrait importer une config sans code pour tout débloquer.
+        if not self.ask_code("Code actuel pour remplacer la config :"):
+            return
+        with self.state.lock:
+            self.state.data["config"] = config
+            if watched is not None:
+                self.state.data["watched_apps"] = watched
+            self.state.save()
+        self.unlocked_blocks.clear()
         self.refresh_objectives()
         self.refresh_code_info()
-        self.refresh_status()
-
-    def change_username(self):
-        new = simpledialog.askstring("Pseudo", "Nouveau pseudo :", parent=self.root)
-        if new:
-            try:
-                self.api.change_username(new)
-                self.build_account_box()
-            except core.ApiError as e:
-                messagebox.showerror("AntiScroll", str(e), parent=self.root)
-
-    def change_password(self):
-        old = simpledialog.askstring("Mot de passe", "Mot de passe actuel :", show="•", parent=self.root)
-        if old is None:
-            return
-        new = simpledialog.askstring("Mot de passe", "Nouveau mot de passe :", show="•", parent=self.root)
-        if new:
-            try:
-                self.api.change_password(old, new)
-                messagebox.showinfo("AntiScroll", "Mot de passe changé ✔", parent=self.root)
-            except core.ApiError as e:
-                messagebox.showerror("AntiScroll", str(e), parent=self.root)
-
-    def logout(self):
-        self.api.logout()
-        self.build_account_box()
-        self.refresh_status()
-
-    def delete_account(self):
-        pw = simpledialog.askstring("Supprimer le compte",
-                                    "Mot de passe du compte (action définitive) :",
-                                    show="•", parent=self.root)
-        if pw:
-            try:
-                self.api.delete_account(pw)
-                self.build_account_box()
-            except core.ApiError as e:
-                messagebox.showerror("AntiScroll", str(e), parent=self.root)
+        self.recheck.set(config["settings"]["app_recheck_min"])
+        if watched is not None:
+            self.apps_txt.delete("1.0", "end")
+            self.apps_txt.insert("1.0", "\n".join(watched))
+        n = len(config["objectives"])
+        messagebox.showinfo("AntiScroll", f"Config importée ✔ ({n} objectif{'s' if n > 1 else ''})",
+                            parent=self.root)
 
     def install_autostart(self):
         script = os.path.abspath(__file__)
@@ -970,10 +874,7 @@ class App:
 
     def refresh_status(self):
         parts = ["Extension : pont actif ✔" if self.bridge_ok else "Pont extension : port occupé ✖"]
-        parts.append(f"Compte : {self.state.data['username']}" if self.state.data.get("token")
-                     else "Hors ligne (pas de compte)")
-        if self.server_httpd:
-            parts.append("Serveur ✔")
+        parts.append("Stockage local")
         if self.dev_mode:
             parts.append(f"Mode {devmode.MODES[self.dev_mode]} ✔")
         self.status.config(text="  •  ".join(parts))
@@ -1028,17 +929,13 @@ class App:
                               f"Temps bloqué jusqu'à {end:%H:%M}. Tes programmes tournent toujours derrière.",
                               unlock, countdown_to=end)
 
-        if self.state.data.get("token") and time.time() - self.last_sync > 300:
-            self.sync_bg()
         self.root.after(5000, self.tick)
 
     def pump_events(self):
         try:
             while True:
                 kind, payload = self.events.get_nowait()
-                if kind == "synced":
-                    self.after_sync()
-                elif kind == "app":
+                if kind == "app":
                     self.app_detected(payload)
                 elif kind == "dev_started":
                     names = {k: n for k, n, _p in devmode.DEV_APPS}

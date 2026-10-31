@@ -28,15 +28,18 @@ import kotlin.concurrent.thread
 class MainActivity : Activity() {
 
     private lateinit var store: Store
-    private lateinit var api: Api
     private lateinit var content: LinearLayout
     private lateinit var cur: LinearLayout      // carte (section) en cours de remplissage
     private val days = listOf("Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim")
 
+    companion object {
+        private const val REQ_EXPORT = 10
+        private const val REQ_IMPORT = 11
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         store = Store(this)
-        api = Api(store)
         window.statusBarColor = Ui.CYAN_DARK
         val page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -69,7 +72,38 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         build()
-        if (store.token.isNotEmpty()) bg({ api.sync() }) { if (it == null) build() }
+    }
+
+    // ------------------------- export / import ----------------------------- //
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        val uri = data?.data
+        if (resultCode != RESULT_OK || uri == null) return
+        when (requestCode) {
+            REQ_EXPORT -> try {
+                contentResolver.openOutputStream(uri, "wt")!!.use { it.write(ConfigFile.export(store).toByteArray()) }
+                toast("Config exportée ✔")
+            } catch (e: Exception) {
+                toast("Impossible d'écrire le fichier")
+            }
+            REQ_IMPORT -> {
+                val parsed = try {
+                    val txt = contentResolver.openInputStream(uri)!!.use { it.readBytes().toString(Charsets.UTF_8) }
+                    ConfigFile.parse(txt)
+                } catch (e: ConfigFileException) {
+                    return toast(e.message ?: "Fichier invalide")
+                } catch (e: Exception) {
+                    return toast("Impossible de lire le fichier")
+                }
+                // Code actuel obligatoire : sinon on pourrait tout débloquer en important une config sans code.
+                withCode("Code actuel pour remplacer la config") {
+                    store.config = parsed.first
+                    parsed.second?.let { store.disabledApps = it }
+                    build()
+                    toast("Config importée ✔ (${store.objectives().size} objectif(s))")
+                }
+            }
+        }
     }
 
     // ------------------------------ helpers -------------------------------- //
@@ -141,14 +175,6 @@ class MainActivity : Activity() {
 
     private fun toast(t: String) = Toast.makeText(this, t, Toast.LENGTH_LONG).show()
 
-    /** Lance une tâche réseau en arrière-plan ; done(null) = succès, sinon message d'erreur. */
-    private fun bg(work: () -> Unit, done: (String?) -> Unit) {
-        thread {
-            val err = try { work(); null } catch (e: ApiException) { e.message ?: "Erreur" } catch (e: Exception) { "Erreur : ${e.message}" }
-            runOnUiThread { done(err) }
-        }
-    }
-
     private fun askText(title: String, hint: String, password: Boolean, onText: (String) -> Unit) {
         val input = EditText(this).apply {
             this.hint = hint
@@ -175,10 +201,6 @@ class MainActivity : Activity() {
                 runOnUiThread { if (ok) onOk() else toast("Code incorrect") }
             }
         }
-    }
-
-    private fun syncBg() {
-        if (store.token.isNotEmpty()) bg({ api.sync() }) { }
     }
 
     private fun serviceEnabled(): Boolean {
@@ -218,7 +240,7 @@ class MainActivity : Activity() {
                             val rec = Crypto.make(c1)
                             runOnUiThread {
                                 store.edit { it.put("unlock", rec) }
-                                syncBg(); build(); toast("Code enregistré ✔")
+                                build(); toast("Code enregistré ✔")
                             }
                         }
                     }
@@ -242,7 +264,7 @@ class MainActivity : Activity() {
             button("✕", r, Ui.Kind.DANGER) {
                 withCode("Code pour supprimer « ${o.title} »") {
                     store.setObjectives(store.objectives().filter { it.id != o.id })
-                    syncBg(); build()
+                    build()
                 }
             }
         }
@@ -268,7 +290,7 @@ class MainActivity : Activity() {
                 title.text.toString().ifBlank { "Objectif" }, start, minutes,
                 checks.indices.filter { checks[it].isChecked })
             store.setObjectives(store.objectives() + o)
-            syncBg(); build(); toast("Objectif ajouté ✔ (alertes 10, 5 et 1 min avant)")
+            build(); toast("Objectif ajouté ✔ (alertes 10, 5 et 1 min avant)")
         }
 
         // Apps surveillées
@@ -289,48 +311,26 @@ class MainActivity : Activity() {
             cur.addView(cb)
         }
 
-        // Compte
-        section("Compte")
-        val srv = field("Serveur (ex. http://100.x.y.z:47800)")
-        srv.setText(store.serverUrl)
-        fun saveSrv() {
-            var u = srv.text.toString().trim().trimEnd('/')
-            if (u.isNotEmpty() && !u.startsWith("http")) u = "http://$u"
-            store.serverUrl = u
+        // Transférer la config
+        section("Transférer la config")
+        text("Tout reste sur ce téléphone : pas de compte, pas de serveur.\n" +
+             "Pour avoir les mêmes réglages sur un autre appareil : exporte la config, " +
+             "envoie le fichier (mail, Drive, câble…), puis importe-le là-bas.")
+        button("Exporter la config") {
+            startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "application/json"
+                putExtra(Intent.EXTRA_TITLE, "antiscroll-config.json")
+            }, REQ_EXPORT)
         }
-        if (store.token.isNotEmpty()) {
-            text("Connecté : ${store.username}", Ui.TEXT).setTypeface(null, Typeface.BOLD)
-            button("Synchroniser") { saveSrv(); bg({ api.sync() }) { toast(it ?: "Synchronisé ✔"); build() } }
-            button("Changer de pseudo", kind = Ui.Kind.SECONDARY) {
-                askText("Nouveau pseudo", "Pseudo", false) { n ->
-                    saveSrv(); bg({ api.changeUsername(n) }) { toast(it ?: "Pseudo changé ✔"); build() }
-                }
-            }
-            button("Changer le mot de passe", kind = Ui.Kind.SECONDARY) {
-                askText("Mot de passe actuel", "Actuel", true) { old ->
-                    askText("Nouveau mot de passe", "6 caractères min.", true) { new ->
-                        bg({ api.changePassword(old, new) }) { toast(it ?: "Mot de passe changé ✔") }
-                    }
-                }
-            }
-            button("Se déconnecter", kind = Ui.Kind.SECONDARY) { bg({ api.logout() }) { build() } }
-            button("Supprimer le compte", kind = Ui.Kind.DANGER) {
-                askText("Supprimer le compte (définitif)", "Mot de passe du compte", true) { pw ->
-                    bg({ api.deleteAccount(pw) }) { toast(it ?: "Compte supprimé"); build() }
-                }
-            }
-        } else {
-            val u = field("Pseudo")
-            val p = field("Mot de passe du compte", password = true)
-            val r = row()
-            button("Se connecter", r) {
-                saveSrv(); bg({ api.login(u.text.toString(), p.text.toString()) }) { toast(it ?: "Connecté ✔"); build() }
-            }
-            button("Créer un compte", r, Ui.Kind.SECONDARY) {
-                saveSrv(); bg({ api.register(u.text.toString(), p.text.toString()) }) { toast(it ?: "Compte créé ✔"); build() }
-            }
-            text("Sans compte, l'app marche quand même (sans synchro).", Ui.MUTED)
+        button("Importer une config (code requis)", kind = Ui.Kind.SECONDARY) {
+            startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "*/*"
+            }, REQ_IMPORT)
         }
+        text("Le fichier contient ton code sous forme chiffrée (jamais en clair) et tes objectifs. " +
+             "Importer remplace la config de ce téléphone.")
         content.addView(View(this), LinearLayout.LayoutParams(1, px(40)))
     }
 }
