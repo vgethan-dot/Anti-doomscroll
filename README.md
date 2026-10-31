@@ -1,11 +1,10 @@
 # AntiScroll
 
 Anti-doomscroll pour toi et tes potes : PC (Ubuntu + Windows), Firefox et Android.
-Rien sur un store, rien sur un serveur public : les comptes sont stockés sur **ton PC**.
+Rien sur un store, aucun serveur, aucun compte : **tout est stocké sur chaque appareil**.
 
 | Dossier     | Ce que c'est |
 |-------------|--------------|
-| `server/`   | Serveur de comptes (pseudo unique + mot de passe, réglages synchronisés). Fichiers JSON. |
 | `pc/`       | App PC : écran noir, objectifs, alertes, surveillance des apps installées. |
 | `firefox/`  | Extension : ton code est demandé **à chaque vidéo** (Shorts, Reels, TikTok, Spotlight, FB Reels). |
 | `android/`  | App Android : pareil sur le téléphone, via le service d'accessibilité. |
@@ -16,31 +15,32 @@ Rien sur un store, rien sur un serveur public : les comptes sont stockés sur **
 - **Écran noir sans arrêter les processus** : c'est juste une fenêtre noire au-dessus de tout. Rien n'est mis en veille, rien n'est tué : téléchargements, musique, compilations, jeux… tout continue derrière.
 - **Objectifs** : par exemple « Réviser, 18:30, 60 min, lun-ven ». Tu reçois une alerte 10, 5 et 1 minute avant. Ensuite, ton PC et ton téléphone sont bloqués pendant 60 minutes, sauf si tu tapes ton code.
 - **Actions protégées par le code** : supprimer un objectif, arrêter de surveiller une app, quitter l'app PC.
-- **Mot de passe du compte ≠ code de déblocage.** Le compte sert à se connecter, le code sert à débloquer.
+- **Pas de lien entre appareils** : chaque PC et chaque téléphone garde ses propres réglages. Pour copier les mêmes réglages ailleurs, utilise *Exporter / Importer la config* (voir plus bas).
 
 ---
 
-## 1. Tailscale (une seule fois, toi + tes potes)
+## 1. Copier ta config sur un autre appareil
 
-1. Installe Tailscale sur ton PC : `curl -fsSL https://tailscale.com/install.sh | sh` puis `sudo tailscale up`.
-2. Note l'adresse de ton PC : `tailscale ip -4`. Ça donne quelque chose comme `100.101.102.103`.
-3. Invite tes potes dans ton réseau Tailscale (console Tailscale → *Share* / *Invite*). Ils installent Tailscale sur leur PC ou téléphone.
-4. Ouvre le port **seulement** pour Tailscale : `sudo ufw allow in on tailscale0 to any port 47800`.
+Il n'y a plus de compte ni de serveur. Pour avoir le même code et les mêmes objectifs partout :
 
-L'adresse du serveur pour tout le monde sera donc : `http://100.101.102.103:47800`.
+1. Sur l'appareil déjà réglé : **Exporter la config** (onglet *Config* sur PC, section *Transférer la config* sur Android). Ça crée un fichier `antiscroll-config.json`.
+2. Envoie ce fichier sur l'autre appareil (clé USB, mail, Drive, câble…).
+3. Sur l'autre appareil : **Importer une config**, puis tape le code actuel de cet appareil (s'il en a un).
+
+Le fichier contient ton code **chiffré** (jamais en clair), tes objectifs et les apps surveillées. Le format est le même sur PC et Android : un fichier exporté du PC s'importe sur le téléphone, et inversement.
+
+Le code actuel est demandé avant d'importer : sinon n'importe qui pourrait importer une config sans code pour tout débloquer.
 
 ## 2. App PC
 
 **Ubuntu :** `cd pc && ./lancer_linux.sh`
 **Windows :** installe Python (python.org, coche *Add to PATH*), puis double-clique `pc\lancer_windows.bat`.
 
-- Sur **ton** PC : onglet *Compte* → coche **« Ce PC héberge le serveur »**. Les comptes sont alors stockés dans `~/.antiscroll/server_data/users.json`.
-- Sur les autres appareils : tape l'adresse Tailscale de ton PC, puis *Créer un compte* ou *Se connecter*.
 - Onglet *Code* : choisis ton code.
 - Onglet *Apps PC* → *Lancer au démarrage du PC*.
 - Bouton *Tester l'écran noir* : lance une vidéo ou une musique et vérifie qu'elle continue derrière.
 
-Ton PC doit être allumé pour que les autres se synchronisent. Hors ligne, chaque appareil continue de bloquer avec ses derniers réglages.
+Tes réglages sont enregistrés dans `~/.antiscroll/state.json` (sur Windows : `C:\Users\<toi>\.antiscroll\state.json`).
 
 > Ubuntu avec Wayland : si l'écran noir ne reste pas au premier plan, choisis **« Ubuntu sur Xorg »** sur l'écran de connexion (roue dentée en bas à droite).
 
@@ -85,7 +85,7 @@ Tu peux aussi ouvrir `android/` dans Android Studio et faire *Build → Build AP
 1. Envoie l'APK sur le téléphone et ouvre-le. Autorise *Installer des applis inconnues*.
 2. Ouvre AntiScroll → *Ouvrir les réglages d'accessibilité* → active **AntiScroll**.
 3. Si Android affiche « paramètre restreint » : *Paramètres → Applis → AntiScroll → ⋮ → Autoriser les paramètres restreints*, puis réessaie.
-4. Choisis ton code, ajoute tes objectifs, connecte-toi au serveur. Il faut que Tailscale soit actif sur le téléphone.
+4. Choisis ton code et ajoute tes objectifs, ou importe la config exportée depuis ton PC. L'app n'a même plus besoin d'Internet.
 
 Pendant un objectif, le bouton **« Urgence : 2 min »** (3 fois maximum) laisse passer un appel ou un message important sans le code.
 

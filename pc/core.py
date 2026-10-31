@@ -1,6 +1,7 @@
 """
 AntiScroll PC - logique sans interface (testable) :
-code de déblocage, planning des objectifs, état local, client du serveur.
+code de déblocage, planning des objectifs, état local, export/import de config.
+Tout est stocké sur cet appareil : aucun serveur, aucun lien entre appareils.
 """
 import datetime as dt
 import hashlib
@@ -11,8 +12,6 @@ import os
 import secrets
 import threading
 import time
-import urllib.error
-import urllib.request
 
 PBKDF2_ITER = 150_000          # mêmes réglages que l'extension et l'app Android
 WARN_THRESHOLDS = (10, 5, 1)   # minutes avant le blocage
@@ -126,10 +125,6 @@ class WarningTracker:
 # --------------------------------------------------------------------------- #
 def default_state():
     return {
-        "server_url": "",          # ex. http://100.101.102.103:47800
-        "token": "",
-        "username": "",
-        "host_server": False,      # ce PC fait tourner le serveur
         "watched_apps": list(DEFAULT_WATCHED),
         "config": {"updated_at": 0, "unlock": None, "objectives": [],
                    "settings": {"app_recheck_min": 3}},
@@ -169,92 +164,87 @@ class State:
 
 
 # --------------------------------------------------------------------------- #
-# Client du serveur
+# Export / import de la config (fichier .json à transporter sur un autre appareil)
+#   Le code n'est jamais écrit en clair : seulement son empreinte (sel + hash).
 # --------------------------------------------------------------------------- #
-class ApiError(Exception):
+EXPORT_APP = "antiscroll"
+EXPORT_VERSION = 1
+
+
+class ConfigFileError(ValueError):
     pass
 
 
-class Api:
-    def __init__(self, state):
-        self.state = state
+def export_config(config, watched_apps=None):
+    """Construit le contenu du fichier exporté (dict prêt pour json.dump)."""
+    out = {
+        "app": EXPORT_APP,
+        "version": EXPORT_VERSION,
+        "exported_at": int(time.time() * 1000),
+        "config": {
+            "unlock": config.get("unlock"),
+            "objectives": list(config.get("objectives", [])),
+            "settings": dict(config.get("settings", {})),
+        },
+    }
+    if watched_apps is not None:
+        out["watched_apps"] = list(watched_apps)
+    return out
 
-    def _req(self, method, path, body=None, auth=True, timeout=6):
-        base = self.state.data.get("server_url", "").rstrip("/")
-        if not base:
-            raise ApiError("Adresse du serveur non configurée")
-        data = json.dumps(body).encode() if body is not None else None
-        req = urllib.request.Request(base + path, data=data, method=method)
-        req.add_header("Content-Type", "application/json")
-        if auth and self.state.data.get("token"):
-            req.add_header("Authorization", "Bearer " + self.state.data["token"])
+
+def _check_unlock_rec(rec):
+    if rec is None:
+        return None
+    if not isinstance(rec, dict):
+        raise ConfigFileError("Code invalide dans le fichier")
+    try:
+        bytes.fromhex(rec["salt"])
+        bytes.fromhex(rec["hash"])
+        it = int(rec.get("iter", PBKDF2_ITER))
+    except Exception:
+        raise ConfigFileError("Code invalide dans le fichier")
+    if it < 1000:
+        raise ConfigFileError("Code invalide dans le fichier")
+    return {"salt": rec["salt"], "hash": rec["hash"], "iter": it}
+
+
+def parse_import(text):
+    """Lit un fichier exporté (texte JSON). Renvoie (config, watched_apps ou None)."""
+    try:
+        data = json.loads(text)
+    except Exception:
+        raise ConfigFileError("Ce fichier n'est pas une config AntiScroll")
+    if not isinstance(data, dict) or data.get("app") != EXPORT_APP:
+        raise ConfigFileError("Ce fichier n'est pas une config AntiScroll")
+    if int(data.get("version", 0)) > EXPORT_VERSION:
+        raise ConfigFileError("Config créée par une version plus récente d'AntiScroll")
+    cfg = data.get("config")
+    if not isinstance(cfg, dict):
+        raise ConfigFileError("Config vide ou abîmée")
+    objectives = []
+    for o in cfg.get("objectives", []) or []:
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as r:
-                return json.loads(r.read() or b"{}")
-        except urllib.error.HTTPError as e:
-            try:
-                msg = json.loads(e.read()).get("error", str(e))
-            except Exception:
-                msg = str(e)
-            raise ApiError(msg)
-        except Exception as e:
-            raise ApiError(f"Serveur injoignable ({e})")
-
-    def register(self, username, password):
-        r = self._req("POST", "/register", {"username": username, "password": password}, auth=False)
-        self._logged_in(r)
-
-    def login(self, username, password):
-        r = self._req("POST", "/login", {"username": username, "password": password}, auth=False)
-        self._logged_in(r)
-
-    def _logged_in(self, r):
-        with self.state.lock:
-            self.state.data["token"] = r["token"]
-            self.state.data["username"] = r["username"]
-            self.state.save()
-        self.sync(prefer_server_if_empty=True)
-
-    def logout(self):
-        try:
-            self._req("POST", "/logout", {})
-        except ApiError:
-            pass
-        with self.state.lock:
-            self.state.data["token"] = ""
-            self.state.data["username"] = ""
-            self.state.save()
-
-    def change_password(self, old, new):
-        self._req("POST", "/account/password", {"old": old, "new": new})
-
-    def change_username(self, new):
-        r = self._req("POST", "/account/username", {"username": new})
-        with self.state.lock:
-            self.state.data["username"] = r["username"]
-            self.state.save()
-
-    def delete_account(self, password):
-        self._req("DELETE", "/account", {"password": password})
-        with self.state.lock:
-            self.state.data["token"] = ""
-            self.state.data["username"] = ""
-            self.state.save()
-
-    def sync(self, prefer_server_if_empty=False):
-        """Synchronise la config (le plus récent gagne)."""
-        if not self.state.data.get("token"):
-            return False
-        remote = self._req("GET", "/config")["config"]
-        with self.state.lock:
-            local = self.state.config
-            r_t, l_t = remote.get("updated_at", 0), local.get("updated_at", 0)
-            local_empty = not local.get("objectives") and not local.get("unlock")
-            if r_t > l_t or (prefer_server_if_empty and local_empty and r_t > 0):
-                self.state.data["config"] = remote
-                self.state.save()
-            elif l_t > r_t:
-                pushed = self._req("PUT", "/config", {"config": local})["config"]
-                self.state.data["config"] = pushed
-                self.state.save()
-        return True
+            hh, mm = parse_hhmm(str(o["start"]))
+            dur = int(o["duration"])
+            assert 0 < dur <= 24 * 60
+            days = sorted(set(int(d) for d in o.get("days", []) if 0 <= int(d) <= 6))
+            objectives.append({"id": str(o.get("id") or secrets.token_hex(6)),
+                               "title": str(o.get("title") or "Objectif"),
+                               "start": f"{hh:02d}:{mm:02d}", "duration": dur, "days": days})
+        except Exception:
+            raise ConfigFileError("Un objectif du fichier est abîmé")
+    settings = cfg.get("settings") if isinstance(cfg.get("settings"), dict) else {}
+    try:
+        recheck = max(1, min(120, int(settings.get("app_recheck_min", 3))))
+    except Exception:
+        recheck = 3
+    config = {"updated_at": int(time.time() * 1000),
+              "unlock": _check_unlock_rec(cfg.get("unlock")),
+              "objectives": objectives,
+              "settings": {"app_recheck_min": recheck}}
+    watched = data.get("watched_apps")
+    if isinstance(watched, list):
+        watched = [str(n).strip().lower() for n in watched if str(n).strip()]
+    else:
+        watched = None
+    return config, watched

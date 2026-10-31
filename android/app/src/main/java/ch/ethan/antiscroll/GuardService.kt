@@ -38,7 +38,6 @@ import kotlin.math.ceil
 class GuardService : AccessibilityService() {
 
     private lateinit var store: Store
-    private lateinit var api: Api
     private val ui = Handler(Looper.getMainLooper())
     private var wm: WindowManager? = null
 
@@ -54,12 +53,10 @@ class GuardService : AccessibilityService() {
     private val unlockedBlocks = HashSet<String>()
     private var emergencyUntil = 0L
     private val emergencyUses = HashMap<String, Int>()
-    private var lastSync = 0L
     private var appOkUntil = 0L                       // TikTok autorisé jusqu'à...
 
     override fun onServiceConnected() {
         store = Store(this)
-        api = Api(store)
         wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel("warn", "Alertes objectifs",
@@ -153,10 +150,6 @@ class GuardService : AccessibilityService() {
     private val tick = object : Runnable {
         override fun run() {
             try { checkObjectives() } catch (_: Exception) {}
-            if (store.token.isNotEmpty() && System.currentTimeMillis() - lastSync > 5 * 60_000) {
-                lastSync = System.currentTimeMillis()
-                thread { runCatching { api.sync() } }
-            }
             ui.postDelayed(this, 10_000)
         }
     }
