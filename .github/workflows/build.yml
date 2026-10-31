@@ -17,8 +17,20 @@ jobs:
         with: { distribution: temurin, java-version: "17" }
       - uses: gradle/actions/setup-gradle@v4
         with: { gradle-version: "8.9" }
+      - name: Préparer la clé de signature fixe
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/antiscroll.keystore"
+            echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/antiscroll.keystore" >> "$GITHUB_ENV"
+          else
+            echo "::warning::Secret ANDROID_KEYSTORE_B64 absent : APK signé avec une clé jetable (pas de mise à jour possible)."
+          fi
       - name: Compiler l'APK
         working-directory: android
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: gradle assembleDebug --no-daemon
       - uses: actions/upload-artifact@v4
         with:
