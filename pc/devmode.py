@@ -1,9 +1,10 @@
 """
-Mode dev : laisser le PC allumé, écran ÉTEINT, au calme, pour que Claude
+Mode dev : laisser le PC allumé, écran tout noir, au calme, pour que Claude
 puisse continuer à travailler dessus pendant que tu es sur ton téléphone.
 
 Deux modes :
-- "dev"    : écran éteint + PC qui ne se met pas en veille + basse conso.
+- "dev"    : écran noir (disparaît dès que tu bouges la souris) + PC qui ne se
+             met pas en veille + basse conso.
 - "roblox" : pareil, et en plus Roblox Studio, Claude et Blender sont lancés
              puis relancés automatiquement s'ils se ferment.
 
@@ -35,77 +36,49 @@ def _run(cmd, timeout=5):
         return False, str(e)
 
 
-def _desktop():
-    return (os.environ.get("XDG_CURRENT_DESKTOP", "") + " "
-            + os.environ.get("DESKTOP_SESSION", "")).lower()
-
-
 def _wayland():
     return bool(os.environ.get("WAYLAND_DISPLAY")) or \
         os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland"
 
 
 # --------------------------------------------------------------------------- #
-# Écran : vraiment l'éteindre (pas juste une fenêtre noire)
+# Inactivité : depuis quand personne n'a touché la souris / le clavier
 # --------------------------------------------------------------------------- #
-def screen_off():
-    """Éteint l'écran. Le PC continue de tourner.
-    L'écran se rallume tout seul dès que tu bouges la souris ou tapes une touche.
-    Renvoie True si une méthode a marché, False sinon."""
-    if IS_WIN:
+def _xss_idle():
+    """X11 : demande l'inactivité directement à Xorg (libXss), sans outil à installer."""
+    if not os.environ.get("DISPLAY"):
+        return None
+    try:
+        import ctypes
+        import ctypes.util
+
+        class Info(ctypes.Structure):
+            _fields_ = [("window", ctypes.c_ulong), ("state", ctypes.c_int),
+                        ("kind", ctypes.c_int), ("til_or_since", ctypes.c_ulong),
+                        ("idle", ctypes.c_ulong), ("eventMask", ctypes.c_ulong)]
+        xlib = ctypes.cdll.LoadLibrary(ctypes.util.find_library("X11") or "libX11.so.6")
+        xss = ctypes.cdll.LoadLibrary(ctypes.util.find_library("Xss") or "libXss.so.1")
+        xlib.XOpenDisplay.restype = ctypes.c_void_p
+        xlib.XDefaultRootWindow.restype = ctypes.c_ulong
+        xlib.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
+        xlib.XCloseDisplay.argtypes = [ctypes.c_void_p]
+        xlib.XFree.argtypes = [ctypes.c_void_p]
+        xss.XScreenSaverAllocInfo.restype = ctypes.POINTER(Info)
+        xss.XScreenSaverQueryInfo.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.POINTER(Info)]
+        dpy = xlib.XOpenDisplay(None)
+        if not dpy:
+            return None
         try:
-            import ctypes
-            # HWND_BROADCAST, WM_SYSCOMMAND, SC_MONITORPOWER, 2 = éteint
-            ctypes.windll.user32.PostMessageW(0xFFFF, 0x0112, 0xF170, 2)
-            return True
-        except Exception:
-            return False
-
-    desk = _desktop()
-    if _wayland():
-        if "gnome" in desk or "ubuntu" in desk:
-            ok, _ = _run(["gdbus", "call", "--session", "--dest", "org.gnome.Mutter.DisplayConfig",
-                          "--object-path", "/org/gnome/Mutter/DisplayConfig",
-                          "--method", "org.freedesktop.DBus.Properties.Set",
-                          "org.gnome.Mutter.DisplayConfig", "PowerSaveMode", "<int32 3>"])
-            if ok:
-                return True
-        if shutil.which("kscreen-doctor"):
-            ok, _ = _run(["kscreen-doctor", "--dpms", "off"])
-            if ok:
-                return True
-        if shutil.which("wlopm"):
-            ok, _ = _run(["wlopm", "--off", "*"])
-            if ok:
-                return True
-    if shutil.which("xset") and os.environ.get("DISPLAY"):
-        ok, _ = _run(["xset", "dpms", "force", "off"])
-        if ok:
-            return True
-    return False
-
-
-def screen_on():
-    if IS_WIN:
-        try:
-            import ctypes
-            ctypes.windll.user32.PostMessageW(0xFFFF, 0x0112, 0xF170, -1)
-            # petit mouvement de souris "virtuel" de 0 pixel pour être sûr
-            ctypes.windll.user32.mouse_event(0x0001, 0, 0, 0, 0)
-        except Exception:
-            pass
-        return
-    if _wayland():
-        _run(["gdbus", "call", "--session", "--dest", "org.gnome.Mutter.DisplayConfig",
-              "--object-path", "/org/gnome/Mutter/DisplayConfig",
-              "--method", "org.freedesktop.DBus.Properties.Set",
-              "org.gnome.Mutter.DisplayConfig", "PowerSaveMode", "<int32 0>"])
-        if shutil.which("kscreen-doctor"):
-            _run(["kscreen-doctor", "--dpms", "on"])
-        if shutil.which("wlopm"):
-            _run(["wlopm", "--on", "*"])
-    if shutil.which("xset") and os.environ.get("DISPLAY"):
-        _run(["xset", "dpms", "force", "on"])
+            info = xss.XScreenSaverAllocInfo()
+            if not xss.XScreenSaverQueryInfo(dpy, xlib.XDefaultRootWindow(dpy), info):
+                return None
+            ms = info.contents.idle
+            xlib.XFree(info)
+            return ms / 1000.0
+        finally:
+            xlib.XCloseDisplay(dpy)
+    except Exception:
+        return None
 
 
 def idle_seconds():
@@ -135,6 +108,11 @@ def idle_seconds():
                 return int(out.split()[1].rstrip(",)")) / 1000.0
             except (IndexError, ValueError):
                 pass
+    if _wayland():
+        return None     # sous Wayland, Xorg ne voit pas toute la souris : on ne devine pas
+    x = _xss_idle()
+    if x is not None:
+        return x
     if shutil.which("xprintidle") and os.environ.get("DISPLAY"):
         ok, out = _run(["xprintidle"])
         if ok:
@@ -143,41 +121,6 @@ def idle_seconds():
             except ValueError:
                 pass
     return None
-
-
-class X11Dpms:
-    """Sur X11 sans moyen de mesurer l'inactivité, on demande à X d'éteindre
-    l'écran lui-même après N secondes, puis on remet les anciens réglages."""
-
-    def __init__(self):
-        self.saved = None
-
-    def set_timeout(self, seconds):
-        if IS_WIN or not shutil.which("xset") or not os.environ.get("DISPLAY"):
-            return
-        ok, out = _run(["xset", "q"])
-        if ok and self.saved is None:
-            enabled = "DPMS is Enabled" in out
-            vals = [0, 0, 0]
-            for line in out.splitlines():
-                if "Standby:" in line and "Off:" in line:
-                    try:
-                        p = line.split()
-                        vals = [int(p[1]), int(p[3]), int(p[5])]
-                    except (IndexError, ValueError):
-                        pass
-            self.saved = (enabled, vals)
-        s = str(int(seconds))
-        _run(["xset", "+dpms"])
-        _run(["xset", "dpms", s, s, s])
-
-    def restore(self):
-        if self.saved is None:
-            return
-        enabled, vals = self.saved
-        _run(["xset", "dpms"] + [str(v) for v in vals])
-        _run(["xset", "+dpms" if enabled else "-dpms"])
-        self.saved = None
 
 
 # --------------------------------------------------------------------------- #
