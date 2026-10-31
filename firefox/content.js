@@ -70,23 +70,29 @@
     overlay = document.createElement("div");
     overlay.setAttribute("style", [
       "position:fixed", "inset:0", "z-index:2147483647", "background:#000",
-      "display:flex", "flex-direction:column", "align-items:center", "justify-content:center",
-      "font-family:system-ui,sans-serif", "color:#fff", "gap:12px"
+      "display:flex", "align-items:center", "justify-content:center",
+      "font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif", "padding:16px"
     ].join(";"));
+    // Fond noir opaque + carte blanche/cyan au centre
     overlay.innerHTML = `
-      <div style="font-size:28px;font-weight:700">Encore une vidéo ?</div>
-      <div style="color:#999;font-size:15px;max-width:420px;text-align:center">
-        Tape ton code pour voir <b>cette</b> vidéo. Il sera redemandé à la suivante.</div>
-      <input type="password" placeholder="Code" autocomplete="off"
-        style="font-size:20px;padding:10px 14px;border-radius:10px;border:1px solid #333;
-               background:#151515;color:#fff;text-align:center;width:220px;outline:none">
-      <div style="display:flex;gap:10px">
-        <button data-a="ok" style="font-size:15px;padding:9px 18px;border-radius:9px;border:0;
-          background:#2f6fed;color:#fff;cursor:pointer">Débloquer</button>
-        <button data-a="leave" style="font-size:15px;padding:9px 18px;border-radius:9px;border:0;
-          background:#262626;color:#ccc;cursor:pointer">Partir</button>
-      </div>
-      <div data-m style="color:#ff6b6b;font-size:14px;min-height:18px"></div>`;
+      <div style="background:#fff;color:#0f172a;border-radius:22px;border:2px solid #06b6d4;
+                  box-shadow:0 20px 60px rgba(6,182,212,.25);padding:30px 28px 22px;
+                  width:100%;max-width:400px;box-sizing:border-box;
+                  display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center">
+        <div style="font-size:13px;font-weight:700;color:#0891b2;letter-spacing:.04em">AntiScroll</div>
+        <div style="font-size:26px;font-weight:800;line-height:1.2">Encore une vidéo ?</div>
+        <div style="color:#64748b;font-size:15px;line-height:1.45">
+          Tape ton code pour voir <b style="color:#0f172a">cette</b> vidéo. Il sera redemandé à la suivante.</div>
+        <input type="password" placeholder="Code" autocomplete="off"
+          style="font-size:20px;padding:12px 14px;border-radius:12px;border:2px solid #dbe7ec;
+                 background:#f4f9fb;color:#0f172a;text-align:center;width:100%;box-sizing:border-box;
+                 outline:none;margin-top:4px">
+        <button data-a="ok" style="font-size:16px;font-weight:700;padding:12px 18px;border-radius:12px;
+          border:0;background:#06b6d4;color:#fff;cursor:pointer;width:100%">Débloquer</button>
+        <button data-a="leave" style="font-size:14px;padding:8px 18px;border-radius:10px;border:0;
+          background:transparent;color:#64748b;cursor:pointer;text-decoration:underline">Partir</button>
+        <div data-m style="color:#ef4444;font-size:14px;min-height:18px"></div>
+      </div>`;
     document.documentElement.appendChild(overlay);
     const input = overlay.querySelector("input");
     const msg = overlay.querySelector("[data-m]");
@@ -106,6 +112,11 @@
     overlay.querySelector('[data-a="leave"]').onclick = () => {
       location.href = host.includes("youtube.com") ? "https://www.youtube.com/feed/subscriptions" : "about:blank";
     };
+    input.addEventListener("focus", () => { input.style.borderColor = "#06b6d4"; });
+    input.addEventListener("blur", () => { input.style.borderColor = "#dbe7ec"; });
+    const okBtn = overlay.querySelector('[data-a="ok"]');
+    okBtn.addEventListener("mouseenter", () => { okBtn.style.background = "#0891b2"; });
+    okBtn.addEventListener("mouseleave", () => { okBtn.style.background = "#06b6d4"; });
     setTimeout(() => input.focus(), 50);
   }
 

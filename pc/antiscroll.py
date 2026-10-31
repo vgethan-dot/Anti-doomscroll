@@ -41,6 +41,112 @@ DAYS = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]
 
 
 # --------------------------------------------------------------------------- #
+# Thème moderne : blanc + bleu cyan
+# --------------------------------------------------------------------------- #
+C = {
+    "bg": "#f4f9fb",         # fond de la fenêtre
+    "card": "#ffffff",       # cartes / champs
+    "text": "#0f172a",       # texte principal
+    "muted": "#64748b",      # texte secondaire
+    "border": "#dbe7ec",     # bordures
+    "cyan": "#06b6d4",       # couleur principale
+    "cyan_dark": "#0891b2",  # survol / appui
+    "cyan_soft": "#e0f7fb",  # fond léger cyan
+    "red": "#ef4444",
+    "green": "#10b981",
+}
+FONT = "Segoe UI" if IS_WIN else "Helvetica"
+
+
+def apply_theme(root):
+    """Applique le thème blanc + cyan à toute l'app (widgets ttk)."""
+    global FONT
+    import tkinter.font as tkfont
+    fams = set(tkfont.families(root))
+    for fam in ("Segoe UI", "Inter", "Ubuntu", "Cantarell", "Noto Sans", "DejaVu Sans"):
+        if fam in fams:
+            FONT = fam
+            break
+    for name in ("TkDefaultFont", "TkTextFont", "TkMenuFont", "TkHeadingFont"):
+        try:
+            tkfont.nametofont(name).configure(family=FONT, size=10)
+        except tk.TclError:
+            pass
+
+    root.configure(bg=C["bg"])
+    st = ttk.Style(root)
+    st.theme_use("clam")
+    st.configure(".", background=C["bg"], foreground=C["text"], font=(FONT, 10),
+                 bordercolor=C["border"], lightcolor=C["border"], darkcolor=C["border"],
+                 troughcolor=C["cyan_soft"], focuscolor=C["cyan"],
+                 selectbackground=C["cyan"], selectforeground="white")
+    st.configure("TFrame", background=C["bg"])
+    st.configure("Card.TFrame", background=C["card"])
+    st.configure("Header.TFrame", background=C["cyan"])
+    st.configure("TLabel", background=C["bg"], foreground=C["text"])
+    st.configure("Card.TLabel", background=C["card"])
+    st.configure("Muted.TLabel", foreground=C["muted"])
+    st.configure("CardTitle.TLabel", background=C["card"], font=(FONT, 12, "bold"))
+    st.configure("Header.TLabel", background=C["cyan"], foreground="white",
+                 font=(FONT, 17, "bold"))
+    st.configure("HeaderSub.TLabel", background=C["cyan"], foreground="#e6fbff",
+                 font=(FONT, 10))
+
+    # Boutons : blancs avec bordure, et "Accent" = cyan plein
+    st.configure("TButton", background=C["cyan_soft"], foreground=C["cyan_dark"],
+                 bordercolor=C["cyan_soft"], lightcolor=C["cyan_soft"], darkcolor=C["cyan_soft"],
+                 padding=(14, 7), relief="flat", borderwidth=1, focusthickness=0,
+                 font=(FONT, 10, "bold"))
+    st.map("TButton",
+           background=[("pressed", "#c6eef6"), ("active", "#c6eef6")],
+           bordercolor=[("active", "#c6eef6"), ("focus", C["cyan"])],
+           foreground=[("disabled", C["muted"])])
+    st.configure("Accent.TButton", background=C["cyan"], foreground="white",
+                 bordercolor=C["cyan"], lightcolor=C["cyan"], darkcolor=C["cyan"],
+                 font=(FONT, 10, "bold"))
+    st.map("Accent.TButton",
+           background=[("pressed", C["cyan_dark"]), ("active", C["cyan_dark"])],
+           bordercolor=[("active", C["cyan_dark"])],
+           lightcolor=[("active", C["cyan_dark"])], darkcolor=[("active", C["cyan_dark"])])
+    st.configure("Danger.TButton", foreground=C["red"], background="#fdecec",
+                 bordercolor="#fdecec", lightcolor="#fdecec", darkcolor="#fdecec")
+    st.map("Danger.TButton", background=[("pressed", "#fbd5d5"), ("active", "#fbd5d5")],
+           bordercolor=[("active", "#fbd5d5")])
+
+    # Onglets
+    st.configure("TNotebook", background=C["bg"], borderwidth=0, tabmargins=(0, 6, 0, 0))
+    st.configure("TNotebook.Tab", background=C["bg"], foreground=C["muted"],
+                 padding=(16, 8), borderwidth=0, font=(FONT, 10, "bold"))
+    st.map("TNotebook.Tab",
+           background=[("selected", C["card"]), ("active", C["cyan_soft"])],
+           foreground=[("selected", C["cyan_dark"]), ("active", C["text"])],
+           lightcolor=[("selected", C["cyan"])])
+
+    # Champs
+    for w in ("TEntry", "TSpinbox"):
+        st.configure(w, fieldbackground=C["card"], foreground=C["text"], padding=6,
+                     insertcolor=C["text"], arrowcolor=C["cyan_dark"])
+        st.map(w, bordercolor=[("focus", C["cyan"])], lightcolor=[("focus", C["cyan"])])
+    st.configure("TCheckbutton", background=C["bg"], indicatorbackground=C["card"],
+                 indicatorforeground="white")
+    st.map("TCheckbutton",
+           indicatorbackground=[("selected", C["cyan"]), ("active", C["cyan_soft"])],
+           background=[("active", C["bg"])])
+    st.configure("Card.TCheckbutton", background=C["card"])
+    st.map("Card.TCheckbutton", background=[("active", C["card"])])
+    st.configure("TSeparator", background=C["border"])
+
+    # Tableau des objectifs
+    st.configure("Treeview", background=C["card"], fieldbackground=C["card"],
+                 foreground=C["text"], rowheight=30, borderwidth=0)
+    st.map("Treeview", background=[("selected", C["cyan_soft"])],
+           foreground=[("selected", C["cyan_dark"])])
+    st.configure("Treeview.Heading", background=C["card"], foreground=C["muted"],
+                 font=(FONT, 9, "bold"), relief="flat", padding=(8, 6))
+    st.map("Treeview.Heading", background=[("active", C["cyan_soft"])])
+
+
+# --------------------------------------------------------------------------- #
 # Écrans (multi-moniteurs)
 # --------------------------------------------------------------------------- #
 def list_monitors(root):
@@ -122,40 +228,53 @@ class BlackScreen:
             self.windows.append(win)
 
         main = self.windows[0]
-        box = tk.Frame(main, bg="black")
+        # Fond noir opaque (fonctionnel), carte blanche au centre pour le code
+        box = tk.Frame(main, bg=C["card"], padx=44, pady=34,
+                       highlightthickness=3, highlightbackground=C["cyan"])
         box.place(relx=0.5, rely=0.45, anchor="center")
-        tk.Label(box, text=title, fg="white", bg="black",
-                 font=("Helvetica", 30, "bold")).pack(pady=(0, 10))
-        tk.Label(box, text=subtitle, fg="#9a9a9a", bg="black", wraplength=700,
-                 font=("Helvetica", 14), justify="center").pack(pady=(0, 20))
-        self.timer_lbl = tk.Label(box, text="", fg="#7fb2ff", bg="black",
-                                  font=("Helvetica", 20))
-        self.timer_lbl.pack(pady=(0, 20))
+        tk.Label(box, text="AntiScroll", fg=C["cyan_dark"], bg=C["card"],
+                 font=(FONT, 11, "bold")).pack(pady=(0, 6))
+        tk.Label(box, text=title, fg=C["text"], bg=C["card"],
+                 font=(FONT, 26, "bold")).pack(pady=(0, 8))
+        tk.Label(box, text=subtitle, fg=C["muted"], bg=C["card"], wraplength=560,
+                 font=(FONT, 13), justify="center").pack(pady=(0, 16))
+        self.timer_lbl = tk.Label(box, text="", fg=C["cyan_dark"], bg=C["card"],
+                                  font=(FONT, 20, "bold"))
+        if countdown_to:
+            self.timer_lbl.pack(pady=(0, 12))
 
         has_code = bool(app.state.config.get("unlock"))
-        self.entry = tk.Entry(box, show="•", font=("Helvetica", 18), width=18,
-                              justify="center", bg="#1b1b1b", fg="white",
-                              insertbackground="white", relief="flat")
-        self.msg = tk.Label(box, text="", fg="#ff6b6b", bg="black", font=("Helvetica", 12))
+        self.entry = tk.Entry(box, show="•", font=(FONT, 18), width=16,
+                              justify="center", bg=C["bg"], fg=C["text"],
+                              insertbackground=C["text"], relief="flat",
+                              highlightthickness=2, highlightbackground=C["border"],
+                              highlightcolor=C["cyan"])
+        self.msg = tk.Label(box, text="", fg=C["red"], bg=C["card"], font=(FONT, 11))
+
+        def cyan_button(text):
+            return tk.Button(box, text=text, command=self.submit, font=(FONT, 13, "bold"),
+                             bg=C["cyan"], fg="white", activebackground=C["cyan_dark"],
+                             activeforeground="white", relief="flat", bd=0,
+                             cursor="hand2", padx=28, pady=9)
+
         if has_code:
-            tk.Label(box, text="Code de déblocage", fg="#cfcfcf", bg="black",
-                     font=("Helvetica", 12)).pack()
-            self.entry.pack(ipady=6, pady=6)
+            tk.Label(box, text="Code de déblocage", fg=C["muted"], bg=C["card"],
+                     font=(FONT, 11)).pack()
+            self.entry.pack(ipady=8, pady=8)
             self.entry.bind("<Return>", lambda e: self.submit())
-            tk.Button(box, text="Débloquer", command=self.submit, font=("Helvetica", 13),
-                      bg="#2d2d2d", fg="white", activebackground="#444",
-                      relief="flat", padx=18, pady=6).pack(pady=6)
+            cyan_button("Débloquer").pack(pady=(6, 4))
         else:
             tk.Label(box, text="(Aucun code choisi : crée-en un dans l'app AntiScroll)",
-                     fg="#cfcfcf", bg="black").pack()
-            tk.Button(box, text="Continuer", command=self.submit, bg="#2d2d2d",
-                      fg="white", relief="flat", padx=18, pady=6).pack(pady=6)
+                     fg=C["muted"], bg=C["card"], font=(FONT, 11)).pack()
+            cyan_button("Continuer").pack(pady=(10, 4))
         self.msg.pack()
         if extra_button:
             label, fn = extra_button
             tk.Button(box, text=label, command=lambda: (fn(), self.close()),
-                      bg="#141414", fg="#bbbbbb", relief="flat",
-                      padx=14, pady=4).pack(pady=(18, 0))
+                      bg=C["card"], fg=C["muted"], activebackground=C["bg"],
+                      activeforeground=C["text"], relief="flat", bd=0, cursor="hand2",
+                      highlightthickness=0, font=(FONT, 10, "underline"),
+                      padx=14, pady=4).pack(pady=(14, 0))
         self._keep_on_top()
 
     def submit(self):
@@ -209,10 +328,11 @@ def toast(root, title, text, seconds=10):
     t = tk.Toplevel(root)
     t.overrideredirect(True)
     t.attributes("-topmost", True)
-    t.configure(bg="#202020")
-    tk.Label(t, text=title, fg="white", bg="#202020",
-             font=("Helvetica", 13, "bold")).pack(padx=16, pady=(12, 2), anchor="w")
-    tk.Label(t, text=text, fg="#dddddd", bg="#202020", wraplength=320,
+    t.configure(bg=C["card"], highlightthickness=1, highlightbackground=C["border"])
+    tk.Frame(t, bg=C["cyan"], width=6).pack(side="left", fill="y")
+    tk.Label(t, text=title, fg=C["text"], bg=C["card"],
+             font=(FONT, 13, "bold")).pack(padx=16, pady=(12, 2), anchor="w")
+    tk.Label(t, text=text, fg=C["muted"], bg=C["card"], wraplength=320, font=(FONT, 10),
              justify="left").pack(padx=16, pady=(0, 12), anchor="w")
     t.update_idletasks()
     x = root.winfo_screenwidth() - t.winfo_width() - 24
@@ -288,7 +408,9 @@ class App:
 
         self.root = tk.Tk()
         self.root.title("AntiScroll")
-        self.root.geometry("640x520")
+        self.root.geometry("760x680")
+        self.root.minsize(640, 520)
+        apply_theme(self.root)
         self.root.protocol("WM_DELETE_WINDOW", self.root.iconify)  # fermer = réduire
         self.build_ui()
 
@@ -305,88 +427,95 @@ class App:
 
     # ----------------------------- interface ------------------------------ #
     def build_ui(self):
+        head = ttk.Frame(self.root, style="Header.TFrame", padding=(20, 14))
+        head.pack(fill="x")
+        ttk.Label(head, text="AntiScroll", style="Header.TLabel").pack(anchor="w")
+        ttk.Label(head, text="Moins de scroll, plus de temps pour toi.",
+                  style="HeaderSub.TLabel").pack(anchor="w")
+
         nb = ttk.Notebook(self.root)
-        nb.pack(fill="both", expand=True, padx=8, pady=8)
+        nb.pack(fill="both", expand=True, padx=14, pady=(8, 8))
         self.tab_objectives(nb)
         self.tab_code(nb)
         self.tab_account(nb)
         self.tab_apps(nb)
 
         bar = ttk.Frame(self.root)
-        bar.pack(fill="x", padx=8, pady=(0, 8))
-        self.status = ttk.Label(bar, text="")
+        bar.pack(fill="x", padx=14, pady=(0, 12))
+        self.status = ttk.Label(bar, text="", style="Muted.TLabel")
         self.status.pack(side="left")
         ttk.Button(bar, text="Quitter", command=self.quit_app).pack(side="right")
-        ttk.Button(bar, text="Tester l'écran noir", command=self.test_black).pack(side="right", padx=6)
+        ttk.Button(bar, text="Tester l'écran noir", style="Accent.TButton",
+                   command=self.test_black).pack(side="right", padx=6)
 
     def tab_objectives(self, nb):
-        f = ttk.Frame(nb, padding=10)
+        f = ttk.Frame(nb, padding=18, style="Card.TFrame")
         nb.add(f, text="Objectifs")
         cols = ("titre", "heure", "duree", "jours")
-        self.tree = ttk.Treeview(f, columns=cols, show="headings", height=9)
+        self.tree = ttk.Treeview(f, columns=cols, show="headings", height=8)
         for c, t, w in zip(cols, ("Objectif", "Heure", "Durée", "Jours"), (220, 70, 80, 200)):
             self.tree.heading(c, text=t)
             self.tree.column(c, width=w)
         self.tree.pack(fill="both", expand=True)
 
-        form = ttk.Frame(f)
+        form = ttk.Frame(f, style="Card.TFrame")
         form.pack(fill="x", pady=8)
-        ttk.Label(form, text="Objectif").grid(row=0, column=0, sticky="w")
+        ttk.Label(form, style="Card.TLabel", text="Objectif").grid(row=0, column=0, sticky="w")
         self.o_title = ttk.Entry(form, width=24)
         self.o_title.grid(row=0, column=1, sticky="w")
-        ttk.Label(form, text="Heure (HH:MM)").grid(row=0, column=2, padx=(10, 0))
+        ttk.Label(form, style="Card.TLabel", text="Heure (HH:MM)").grid(row=0, column=2, padx=(10, 0))
         self.o_start = ttk.Entry(form, width=7)
         self.o_start.grid(row=0, column=3)
-        ttk.Label(form, text="Durée (min)").grid(row=0, column=4, padx=(10, 0))
+        ttk.Label(form, style="Card.TLabel", text="Durée (min)").grid(row=0, column=4, padx=(10, 0))
         self.o_dur = ttk.Entry(form, width=6)
         self.o_dur.grid(row=0, column=5)
-        days = ttk.Frame(form)
+        days = ttk.Frame(form, style="Card.TFrame")
         days.grid(row=1, column=0, columnspan=6, sticky="w", pady=6)
-        ttk.Label(days, text="Jours (aucun = tous) :").pack(side="left")
+        ttk.Label(days, style="Card.TLabel", text="Jours (aucun = tous) :").pack(side="left")
         self.o_days = []
         for d in DAYS:
             v = tk.BooleanVar()
-            ttk.Checkbutton(days, text=d, variable=v).pack(side="left")
+            ttk.Checkbutton(days, style="Card.TCheckbutton", text=d, variable=v).pack(side="left")
             self.o_days.append(v)
 
-        btns = ttk.Frame(f)
+        btns = ttk.Frame(f, style="Card.TFrame")
         btns.pack(fill="x")
-        ttk.Button(btns, text="Ajouter", command=self.add_objective).pack(side="left")
-        ttk.Button(btns, text="Supprimer (code requis)", command=self.del_objective).pack(side="left", padx=6)
+        ttk.Button(btns, text="Ajouter", style="Accent.TButton", command=self.add_objective).pack(side="left")
+        ttk.Button(btns, text="Supprimer (code requis)", style="Danger.TButton", command=self.del_objective).pack(side="left", padx=6)
         self.refresh_objectives()
 
     def tab_code(self, nb):
-        f = ttk.Frame(nb, padding=16)
+        f = ttk.Frame(nb, padding=18, style="Card.TFrame")
         nb.add(f, text="Code")
-        ttk.Label(f, text="Ce code est demandé à chaque vidéo (Shorts, Reels, TikTok...),\n"
+        ttk.Label(f, style="Card.TLabel", text="Ce code est demandé à chaque vidéo (Shorts, Reels, TikTok...),\n"
                           "pour débloquer un objectif, supprimer un objectif ou quitter l'app.",
                   justify="left").pack(anchor="w", pady=(0, 12))
-        self.code_info = ttk.Label(f, text="")
+        self.code_info = ttk.Label(f, style="Card.TLabel", text="")
         self.code_info.pack(anchor="w", pady=(0, 8))
-        ttk.Button(f, text="Choisir / changer le code", command=self.set_code).pack(anchor="w")
+        ttk.Button(f, text="Choisir / changer le code", style="Accent.TButton", command=self.set_code).pack(anchor="w")
         ttk.Separator(f).pack(fill="x", pady=16)
-        ttk.Label(f, text="Redemander le code pour les apps PC toutes les (minutes) :").pack(anchor="w")
+        ttk.Label(f, style="Card.TLabel", text="Redemander le code pour les apps PC toutes les (minutes) :").pack(anchor="w")
         self.recheck = ttk.Spinbox(f, from_=1, to=120, width=6)
         self.recheck.set(self.state.config.get("settings", {}).get("app_recheck_min", 3))
         self.recheck.pack(anchor="w", pady=4)
-        ttk.Button(f, text="Enregistrer", command=self.save_recheck).pack(anchor="w")
+        ttk.Button(f, text="Enregistrer", style="Accent.TButton", command=self.save_recheck).pack(anchor="w")
         self.refresh_code_info()
 
     def tab_account(self, nb):
-        f = ttk.Frame(nb, padding=16)
+        f = ttk.Frame(nb, padding=18, style="Card.TFrame")
         nb.add(f, text="Compte")
         self.host_var = tk.BooleanVar(value=self.state.data.get("host_server", False))
-        ttk.Checkbutton(f, text="Ce PC héberge le serveur (les comptes sont stockés ici)",
+        ttk.Checkbutton(f, style="Card.TCheckbutton", text="Ce PC héberge le serveur (les comptes sont stockés ici)",
                         variable=self.host_var, command=self.toggle_host).pack(anchor="w")
-        self.host_info = ttk.Label(f, text="", foreground="#666")
+        self.host_info = ttk.Label(f, style="Card.TLabel", text="", foreground=C["muted"])
         self.host_info.pack(anchor="w", pady=(0, 10))
 
-        ttk.Label(f, text="Adresse du serveur (ex. http://100.x.y.z:47800)").pack(anchor="w")
+        ttk.Label(f, style="Card.TLabel", text="Adresse du serveur (ex. http://100.x.y.z:47800)").pack(anchor="w")
         self.srv = ttk.Entry(f, width=40)
         self.srv.insert(0, self.state.data.get("server_url", ""))
         self.srv.pack(anchor="w", pady=(0, 10))
 
-        self.acc_box = ttk.Frame(f)
+        self.acc_box = ttk.Frame(f, style="Card.TFrame")
         self.acc_box.pack(fill="x")
         self.build_account_box()
 
@@ -395,45 +524,48 @@ class App:
             w.destroy()
         f = self.acc_box
         if self.state.data.get("token"):
-            ttk.Label(f, text=f"Connecté : {self.state.data['username']}",
-                      font=("Helvetica", 12, "bold")).pack(anchor="w", pady=(0, 8))
-            row = ttk.Frame(f)
+            ttk.Label(f, style="CardTitle.TLabel",
+                      text=f"Connecté : {self.state.data['username']}").pack(anchor="w", pady=(0, 8))
+            row = ttk.Frame(f, style="Card.TFrame")
             row.pack(anchor="w")
-            ttk.Button(row, text="Synchroniser", command=self.sync_now).pack(side="left")
+            ttk.Button(row, text="Synchroniser", style="Accent.TButton", command=self.sync_now).pack(side="left")
             ttk.Button(row, text="Changer de pseudo", command=self.change_username).pack(side="left", padx=4)
             ttk.Button(row, text="Changer le mot de passe", command=self.change_password).pack(side="left")
-            row2 = ttk.Frame(f)
+            row2 = ttk.Frame(f, style="Card.TFrame")
             row2.pack(anchor="w", pady=8)
             ttk.Button(row2, text="Se déconnecter", command=self.logout).pack(side="left")
-            ttk.Button(row2, text="Supprimer le compte", command=self.delete_account).pack(side="left", padx=4)
+            ttk.Button(row2, text="Supprimer le compte", style="Danger.TButton", command=self.delete_account).pack(side="left", padx=4)
         else:
-            ttk.Label(f, text="Pseudo").pack(anchor="w")
+            ttk.Label(f, style="Card.TLabel", text="Pseudo").pack(anchor="w")
             self.u = ttk.Entry(f, width=24)
             self.u.pack(anchor="w")
-            ttk.Label(f, text="Mot de passe du compte").pack(anchor="w")
+            ttk.Label(f, style="Card.TLabel", text="Mot de passe du compte").pack(anchor="w")
             self.p = ttk.Entry(f, width=24, show="•")
             self.p.pack(anchor="w")
-            row = ttk.Frame(f)
+            row = ttk.Frame(f, style="Card.TFrame")
             row.pack(anchor="w", pady=8)
-            ttk.Button(row, text="Se connecter", command=lambda: self.auth("login")).pack(side="left")
+            ttk.Button(row, text="Se connecter", style="Accent.TButton", command=lambda: self.auth("login")).pack(side="left")
             ttk.Button(row, text="Créer un compte", command=lambda: self.auth("register")).pack(side="left", padx=6)
-            ttk.Label(f, text="Sans compte, l'app marche quand même (sans synchro).",
-                      foreground="#666").pack(anchor="w")
+            ttk.Label(f, style="Card.TLabel", text="Sans compte, l'app marche quand même (sans synchro).",
+                      foreground=C["muted"]).pack(anchor="w")
 
     def tab_apps(self, nb):
-        f = ttk.Frame(nb, padding=16)
+        f = ttk.Frame(nb, padding=18, style="Card.TFrame")
         nb.add(f, text="Apps PC")
-        ttk.Label(f, text="Noms de processus surveillés (un par ligne).\n"
+        ttk.Label(f, style="Card.TLabel", text="Noms de processus surveillés (un par ligne).\n"
                           "Quand l'un d'eux tourne : écran noir + code.").pack(anchor="w")
-        self.apps_txt = tk.Text(f, height=12, width=40)
+        self.apps_txt = tk.Text(f, height=12, width=40, bg=C["bg"], fg=C["text"],
+                                insertbackground=C["text"], relief="flat", font=(FONT, 10),
+                                highlightthickness=1, highlightbackground=C["border"],
+                                highlightcolor=C["cyan"], padx=8, pady=6)
         self.apps_txt.insert("1.0", "\n".join(self.state.data.get("watched_apps", [])))
         self.apps_txt.pack(anchor="w", pady=6)
-        ttk.Button(f, text="Enregistrer", command=self.save_apps).pack(anchor="w")
+        ttk.Button(f, text="Enregistrer", style="Accent.TButton", command=self.save_apps).pack(anchor="w")
         ttk.Button(f, text="Lancer AntiScroll au démarrage du PC",
                    command=self.install_autostart).pack(anchor="w", pady=(16, 0))
         if psutil is None:
-            ttk.Label(f, text="⚠ Installe psutil (pip install psutil) pour surveiller les apps.",
-                      foreground="#b00").pack(anchor="w", pady=8)
+            ttk.Label(f, style="Card.TLabel", text="⚠ Installe psutil (pip install psutil) pour surveiller les apps.",
+                      foreground=C["red"]).pack(anchor="w", pady=8)
 
     # ----------------------------- actions -------------------------------- #
     def ask_code(self, why):
