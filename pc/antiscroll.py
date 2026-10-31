@@ -323,31 +323,46 @@ class BlackScreen:
 
 
 class PlainBlack:
-    """Secours si le PC refuse d'éteindre l'écran : du noir pur, sans rien
-    dessus (sur un écran OLED, un pixel noir est vraiment éteint).
-    Un clic ou une touche le fait disparaître."""
+    """Écran du mode dev : 100 % noir sur tous les écrans, sans rien dessus.
+    Pas de code : il disparaît dès que tu bouges la souris ou touches le
+    clavier. L'écran reste allumé, il affiche juste du noir."""
 
-    def __init__(self, app):
+    def __init__(self, app, on_close=None):
+        self.on_close = on_close
         self.windows = []
+        self.ready_at = time.time() + 1.0   # ignore les petits sursauts à l'apparition
         for x, y, w, h in list_monitors(app.root):
             win = tk.Toplevel(app.root)
-            win.configure(bg="black", cursor="none")
+            win.configure(bg="black", cursor="none", highlightthickness=0, bd=0)
             win.geometry(f"{w}x{h}+{x}+{y}")
             win.overrideredirect(True)
             win.attributes("-topmost", True)
-            for ev in ("<Button>", "<Key>", "<Motion>"):
-                win.bind(ev, lambda e: self.close())
+            for ev in ("<Button>", "<Key>", "<Motion>", "<MouseWheel>"):
+                win.bind(ev, self._input)
             self.windows.append(win)
         if self.windows:
+            self.windows[0].lift()
             self.windows[0].focus_force()
 
+    @property
+    def shown(self):
+        return bool(self.windows)
+
+    def _input(self, _e=None):
+        if time.time() >= self.ready_at:
+            self.close()
+
     def close(self):
+        if not self.windows:
+            return
         for w in self.windows:
             try:
                 w.destroy()
             except tk.TclError:
                 pass
         self.windows = []
+        if self.on_close:
+            self.on_close()
 
 
 # --------------------------------------------------------------------------- #
@@ -439,9 +454,8 @@ class App:
         # Mode dev
         self.dev_mode = None            # None, "dev" ou "roblox"
         self.dev_sleep = devmode.SleepBlocker()
-        self.dev_dpms = devmode.X11Dpms()
         self.dev_watchdog = devmode.Watchdog()
-        self.dev_screen_off = False     # écran déjà éteint depuis la dernière activité
+        self.dev_black_closed_at = 0.0  # dernière fois que tu as fait partir le noir
         self.dev_black = None
         self.dev_job = None
         self.dev_busy = False
@@ -616,9 +630,9 @@ class App:
         nb.add(f, text="Mode dev")
         ttk.Label(f, style="CardTitle.TLabel", text="Laisse ton PC travailler pendant que tu n'es pas là").pack(anchor="w")
         ttk.Label(f, style="Card.TLabel", foreground=C["muted"], justify="left", text=(
-            "L'écran s'éteint vraiment, le PC ne se met jamais en veille et reste au calme.\n"
+            "L'écran devient tout noir, le PC ne se met jamais en veille et reste au calme.\n"
             "Claude peut continuer à coder dessus quand tu lui écris depuis ton téléphone.\n"
-            "Bouge la souris pour rallumer l'écran. Le blocage anti-scroll reste actif.")
+            "Bouge la souris : tout revient (pas de code). Le blocage anti-scroll reste actif.")
         ).pack(anchor="w", pady=(4, 12))
 
         row = ttk.Frame(f, style="Card.TFrame")
@@ -632,7 +646,7 @@ class App:
         self.dev_info.pack(anchor="w", pady=(8, 0))
 
         ttk.Separator(f).pack(fill="x", pady=14)
-        ttk.Label(f, style="Card.TLabel", text="Rééteindre l'écran après (minutes sans souris ni clavier) :").pack(anchor="w")
+        ttk.Label(f, style="Card.TLabel", text="Remettre l'écran noir après (minutes sans souris ni clavier) :").pack(anchor="w")
         self.dev_idle = ttk.Spinbox(f, from_=1, to=60, width=6, command=self.save_dev_settings)
         self.dev_idle.set(self.state.data.get("dev_idle_min", 2))
         self.dev_idle.pack(anchor="w", pady=4)
@@ -694,20 +708,17 @@ class App:
 
         ok_sleep = self.dev_sleep.start()
         devmode.set_low_priority(True)
-        # X11 sans mesure d'inactivité : X éteint l'écran tout seul après N min
-        if devmode.idle_seconds() is None:
-            self.dev_dpms.set_timeout(self.state.data.get("dev_idle_min", 2) * 60)
         self.dev_watchdog = devmode.Watchdog()
 
         msg = f"Mode {devmode.MODES[mode]} actif"
         if not ok_sleep:
             msg += " (⚠ impossible d'empêcher la veille : règle la veille sur « Jamais »)"
-        self.dev_info.config(text=msg + ". L'écran s'éteint dans 10 s…", foreground=C["cyan_dark"])
+        self.dev_info.config(text=msg + ". Écran noir dans 10 s…", foreground=C["cyan_dark"])
         self.refresh_status()
         if self.dev_job is None:
             self.dev_job = self.root.after(3000, self.dev_tick)
         if not was_on or resumed:
-            self.root.after(10000, self.dev_turn_screen_off)
+            self.root.after(10000, self.dev_show_black)
         self.root.after(1500, self.root.iconify)    # fenêtre réduite = rien à dessiner
 
     def stop_dev(self):
@@ -721,36 +732,38 @@ class App:
             self.root.after_cancel(self.dev_job)
             self.dev_job = None
         self.dev_sleep.stop()
-        self.dev_dpms.restore()
         devmode.set_low_priority(False)
         if self.dev_black:
+            self.dev_black.on_close = None
             self.dev_black.close()
             self.dev_black = None
-        devmode.screen_on()
         self.dev_info.config(text="Mode dev : arrêté (les apps lancées restent ouvertes)",
                              foreground=C["muted"])
         self.refresh_status()
 
-    def dev_turn_screen_off(self):
-        if self.dev_mode is None:
+    def dev_show_black(self):
+        if self.dev_mode is None or (self.dev_black and self.dev_black.shown):
             return
-        self.dev_screen_off = True
-        self.dev_info.config(text=f"Mode {devmode.MODES[self.dev_mode]} actif, écran éteint.",
+        self.dev_info.config(text=f"Mode {devmode.MODES[self.dev_mode]} actif.",
                              foreground=C["cyan_dark"])
-        if not devmode.screen_off() and not (self.dev_black and self.dev_black.windows):
-            self.dev_black = PlainBlack(self)
+        self.dev_black = PlainBlack(self, on_close=self.dev_black_gone)
+
+    def dev_black_gone(self):
+        self.dev_black = None
+        self.dev_black_closed_at = time.time()
 
     def dev_tick(self):
-        """Toutes les 30 s seulement : presque rien à faire, donc presque rien consommé."""
+        """Toutes les 20 s seulement : presque rien à faire, donc presque rien consommé."""
         self.dev_job = None
         if self.dev_mode is None:
             return
-        idle = devmode.idle_seconds()
-        if idle is not None:
-            if idle < 30:
-                self.dev_screen_off = False          # quelqu'un utilise le PC
-            elif not self.dev_screen_off and idle >= self.state.data.get("dev_idle_min", 2) * 60:
-                self.dev_turn_screen_off()
+        if not (self.dev_black and self.dev_black.shown):
+            wait = self.state.data.get("dev_idle_min", 2) * 60
+            idle = devmode.idle_seconds()
+            if idle is None:     # on ne sait pas mesurer : on compte depuis que tu as bougé
+                idle = time.time() - self.dev_black_closed_at
+            if idle >= wait:
+                self.dev_show_black()
         if self.dev_mode == "roblox" and not self.dev_busy:
             cmds = self.state.data.get("dev_apps", {})
 
@@ -763,7 +776,7 @@ class App:
                     self.dev_busy = False
             self.dev_busy = True
             threading.Thread(target=run, daemon=True).start()
-        self.dev_job = self.root.after(30000, self.dev_tick)
+        self.dev_job = self.root.after(20000, self.dev_tick)
 
     # ----------------------------- actions -------------------------------- #
     def ask_code(self, why):

@@ -48,14 +48,14 @@ Ton PC doit être allumé pour que les autres se synchronisent. Hors ligne, chaq
 
 Pour laisser le PC allumé pendant que Claude code dessus et que tu es sur ton téléphone.
 
-- **Dev** : l'écran s'éteint vraiment (10 s après le clic), le PC ne se met jamais en veille, et AntiScroll se fait discret (priorité basse, fenêtre réduite, vérifications espacées).
-- **Dev Roblox** : pareil, et en plus Roblox Studio, Claude et Blender sont ouverts puis relancés s'ils se ferment (vérification toutes les 30 s).
-- Bouger la souris rallume l'écran. Après 2 min sans souris ni clavier (réglable), il se rééteint.
+- **Dev** : 10 s après le clic, tous les écrans deviennent 100 % noirs. Le PC ne se met jamais en veille, et AntiScroll se fait discret (priorité basse, fenêtre réduite, vérifications espacées).
+- **Dev Roblox** : pareil, et en plus Roblox Studio, Claude et Blender sont ouverts puis relancés s'ils se ferment (vérification toutes les 20 s).
+- Bouger la souris fait partir le noir, sans code (ce n'est pas un verrouillage). Après 2 min sans souris ni clavier (réglable), le noir revient.
 - Le blocage anti-scroll (objectifs, apps, extension) reste actif.
 - Si le PC redémarre pendant un mode dev, il reprend tout seul (si AntiScroll se lance au démarrage).
 - Si une app n'est pas trouvée, clique sur *Choisir…* à côté de son nom.
 
-Linux : Roblox Studio passe par [Vinegar](https://vinegarhq.org) et Claude n'a pas d'app officielle, donc indique la commande toi-même si besoin. Pour que l'écran se rééteigne tout seul sous Xorg, installe `xprintidle` (`sudo apt install xprintidle`) ; sinon c'est Xorg qui l'éteint après le délai choisi.
+Linux : Roblox Studio passe par [Vinegar](https://vinegarhq.org) et Claude n'a pas d'app officielle, donc indique la commande toi-même si besoin.
 
 
 ## 3. Extension Firefox
