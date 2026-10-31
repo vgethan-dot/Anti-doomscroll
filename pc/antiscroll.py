@@ -10,6 +10,8 @@ AntiScroll pour PC (Ubuntu + Windows).
   toutes les X minutes.
 - Pont local pour l'extension Firefox (code à chaque vidéo).
 - Comptes + synchro avec le serveur (qui peut tourner sur ce PC).
+- Mode dev (Dev / Dev Roblox) : écran vraiment éteint, PC qui ne se met pas
+  en veille, pour que Claude puisse continuer à bosser dessus.
 """
 import datetime as dt
 import json
@@ -23,12 +25,13 @@ import threading
 import time
 import tkinter as tk
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from tkinter import messagebox, simpledialog, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "server"))
 
 import core  # noqa: E402
+import devmode  # noqa: E402
 
 try:
     import psutil  # facultatif mais recommandé
@@ -319,6 +322,34 @@ class BlackScreen:
         self.app.overlay_closed(self)
 
 
+class PlainBlack:
+    """Secours si le PC refuse d'éteindre l'écran : du noir pur, sans rien
+    dessus (sur un écran OLED, un pixel noir est vraiment éteint).
+    Un clic ou une touche le fait disparaître."""
+
+    def __init__(self, app):
+        self.windows = []
+        for x, y, w, h in list_monitors(app.root):
+            win = tk.Toplevel(app.root)
+            win.configure(bg="black", cursor="none")
+            win.geometry(f"{w}x{h}+{x}+{y}")
+            win.overrideredirect(True)
+            win.attributes("-topmost", True)
+            for ev in ("<Button>", "<Key>", "<Motion>"):
+                win.bind(ev, lambda e: self.close())
+            self.windows.append(win)
+        if self.windows:
+            self.windows[0].focus_force()
+
+    def close(self):
+        for w in self.windows:
+            try:
+                w.destroy()
+            except tk.TclError:
+                pass
+        self.windows = []
+
+
 # --------------------------------------------------------------------------- #
 # Petite notification en haut à droite
 # --------------------------------------------------------------------------- #
@@ -405,6 +436,15 @@ class App:
         self.events = queue.Queue()     # messages des threads vers l'interface
         self.server_httpd = None
         self.last_sync = 0
+        # Mode dev
+        self.dev_mode = None            # None, "dev" ou "roblox"
+        self.dev_sleep = devmode.SleepBlocker()
+        self.dev_dpms = devmode.X11Dpms()
+        self.dev_watchdog = devmode.Watchdog()
+        self.dev_screen_off = False     # écran déjà éteint depuis la dernière activité
+        self.dev_black = None
+        self.dev_job = None
+        self.dev_busy = False
 
         self.root = tk.Tk()
         self.root.title("AntiScroll")
@@ -424,6 +464,9 @@ class App:
         self.root.after(200, self.pump_events)
         if minimized:
             self.root.iconify()
+        # Le PC a redémarré pendant un mode dev (ex. mise à jour) : on reprend.
+        if self.state.data.get("dev_mode") in devmode.MODES:
+            self.root.after(20000, lambda: self.start_dev(self.state.data["dev_mode"], resumed=True))
 
     # ----------------------------- interface ------------------------------ #
     def build_ui(self):
@@ -439,6 +482,7 @@ class App:
         self.tab_code(nb)
         self.tab_account(nb)
         self.tab_apps(nb)
+        self.tab_dev(nb)
 
         bar = ttk.Frame(self.root)
         bar.pack(fill="x", padx=14, pady=(0, 12))
@@ -566,6 +610,160 @@ class App:
         if psutil is None:
             ttk.Label(f, style="Card.TLabel", text="⚠ Installe psutil (pip install psutil) pour surveiller les apps.",
                       foreground=C["red"]).pack(anchor="w", pady=8)
+
+    def tab_dev(self, nb):
+        f = ttk.Frame(nb, padding=18, style="Card.TFrame")
+        nb.add(f, text="Mode dev")
+        ttk.Label(f, style="CardTitle.TLabel", text="Laisse ton PC travailler pendant que tu n'es pas là").pack(anchor="w")
+        ttk.Label(f, style="Card.TLabel", foreground=C["muted"], justify="left", text=(
+            "L'écran s'éteint vraiment, le PC ne se met jamais en veille et reste au calme.\n"
+            "Claude peut continuer à coder dessus quand tu lui écris depuis ton téléphone.\n"
+            "Bouge la souris pour rallumer l'écran. Le blocage anti-scroll reste actif.")
+        ).pack(anchor="w", pady=(4, 12))
+
+        row = ttk.Frame(f, style="Card.TFrame")
+        row.pack(anchor="w")
+        ttk.Button(row, text="Lancer « Dev »", style="Accent.TButton",
+                   command=lambda: self.start_dev("dev")).pack(side="left")
+        ttk.Button(row, text="Lancer « Dev Roblox »", style="Accent.TButton",
+                   command=lambda: self.start_dev("roblox")).pack(side="left", padx=6)
+        ttk.Button(row, text="Arrêter", command=self.stop_dev).pack(side="left")
+        self.dev_info = ttk.Label(f, style="Card.TLabel", text="Mode dev : arrêté", foreground=C["muted"])
+        self.dev_info.pack(anchor="w", pady=(8, 0))
+
+        ttk.Separator(f).pack(fill="x", pady=14)
+        ttk.Label(f, style="Card.TLabel", text="Rééteindre l'écran après (minutes sans souris ni clavier) :").pack(anchor="w")
+        self.dev_idle = ttk.Spinbox(f, from_=1, to=60, width=6, command=self.save_dev_settings)
+        self.dev_idle.set(self.state.data.get("dev_idle_min", 2))
+        self.dev_idle.pack(anchor="w", pady=4)
+
+        ttk.Label(f, style="CardTitle.TLabel", text="Apps du mode Dev Roblox (relancées si elles se ferment)").pack(anchor="w", pady=(12, 4))
+        saved = self.state.data.get("dev_apps", {})
+        self.dev_cmd = {}
+        grid = ttk.Frame(f, style="Card.TFrame")
+        grid.pack(fill="x")
+        for i, (key, name, _p) in enumerate(devmode.DEV_APPS):
+            ttk.Label(grid, style="Card.TLabel", text=name).grid(row=i, column=0, sticky="w", padx=(0, 8))
+            e = ttk.Entry(grid, width=46)
+            e.insert(0, saved.get(key) or devmode.default_command(key))
+            e.grid(row=i, column=1, sticky="we", pady=2)
+            ttk.Button(grid, text="Choisir…",
+                       command=lambda k=key: self.pick_dev_app(k)).grid(row=i, column=2, padx=(6, 0))
+            self.dev_cmd[key] = e
+        grid.columnconfigure(1, weight=1)
+        ttk.Button(f, text="Enregistrer", style="Accent.TButton",
+                   command=self.save_dev_settings).pack(anchor="w", pady=(8, 0))
+        if psutil is None:
+            ttk.Label(f, style="Card.TLabel", foreground=C["red"],
+                      text="⚠ Installe psutil (pip install psutil) pour relancer les apps.").pack(anchor="w", pady=6)
+
+    def pick_dev_app(self, key):
+        path = filedialog.askopenfilename(parent=self.root, title="Choisis le programme")
+        if path:
+            e = self.dev_cmd[key]
+            e.delete(0, "end")
+            e.insert(0, f'"{path}"' if " " in path and not IS_WIN else path)
+            self.save_dev_settings()
+
+    def save_dev_settings(self):
+        try:
+            idle = max(1, min(60, int(self.dev_idle.get())))
+        except ValueError:
+            idle = 2
+        with self.state.lock:
+            self.state.data["dev_idle_min"] = idle
+            self.state.data["dev_apps"] = {k: e.get().strip() for k, e in self.dev_cmd.items()}
+            self.state.save()
+
+    # ------------------------------ mode dev ------------------------------ #
+    def start_dev(self, mode, resumed=False):
+        if mode not in devmode.MODES:
+            return
+        self.save_dev_settings()
+        if mode == "roblox":
+            missing = [n for k, n, _p in devmode.DEV_APPS if not self.dev_cmd[k].get().strip()]
+            if missing and not resumed:
+                messagebox.showwarning("AntiScroll", "Je n'ai pas trouvé : " + ", ".join(missing)
+                                       + ".\nClique sur « Choisir… » pour les indiquer. "
+                                       "Le mode démarre quand même avec les autres.", parent=self.root)
+        was_on = self.dev_mode is not None
+        self.dev_mode = mode
+        with self.state.lock:
+            self.state.data["dev_mode"] = mode
+            self.state.save()
+
+        ok_sleep = self.dev_sleep.start()
+        devmode.set_low_priority(True)
+        # X11 sans mesure d'inactivité : X éteint l'écran tout seul après N min
+        if devmode.idle_seconds() is None:
+            self.dev_dpms.set_timeout(self.state.data.get("dev_idle_min", 2) * 60)
+        self.dev_watchdog = devmode.Watchdog()
+
+        msg = f"Mode {devmode.MODES[mode]} actif"
+        if not ok_sleep:
+            msg += " (⚠ impossible d'empêcher la veille : règle la veille sur « Jamais »)"
+        self.dev_info.config(text=msg + ". L'écran s'éteint dans 10 s…", foreground=C["cyan_dark"])
+        self.refresh_status()
+        if self.dev_job is None:
+            self.dev_job = self.root.after(3000, self.dev_tick)
+        if not was_on or resumed:
+            self.root.after(10000, self.dev_turn_screen_off)
+        self.root.after(1500, self.root.iconify)    # fenêtre réduite = rien à dessiner
+
+    def stop_dev(self):
+        if self.dev_mode is None:
+            return
+        self.dev_mode = None
+        with self.state.lock:
+            self.state.data["dev_mode"] = None
+            self.state.save()
+        if self.dev_job is not None:
+            self.root.after_cancel(self.dev_job)
+            self.dev_job = None
+        self.dev_sleep.stop()
+        self.dev_dpms.restore()
+        devmode.set_low_priority(False)
+        if self.dev_black:
+            self.dev_black.close()
+            self.dev_black = None
+        devmode.screen_on()
+        self.dev_info.config(text="Mode dev : arrêté (les apps lancées restent ouvertes)",
+                             foreground=C["muted"])
+        self.refresh_status()
+
+    def dev_turn_screen_off(self):
+        if self.dev_mode is None:
+            return
+        self.dev_screen_off = True
+        self.dev_info.config(text=f"Mode {devmode.MODES[self.dev_mode]} actif, écran éteint.",
+                             foreground=C["cyan_dark"])
+        if not devmode.screen_off() and not (self.dev_black and self.dev_black.windows):
+            self.dev_black = PlainBlack(self)
+
+    def dev_tick(self):
+        """Toutes les 30 s seulement : presque rien à faire, donc presque rien consommé."""
+        self.dev_job = None
+        if self.dev_mode is None:
+            return
+        idle = devmode.idle_seconds()
+        if idle is not None:
+            if idle < 30:
+                self.dev_screen_off = False          # quelqu'un utilise le PC
+            elif not self.dev_screen_off and idle >= self.state.data.get("dev_idle_min", 2) * 60:
+                self.dev_turn_screen_off()
+        if self.dev_mode == "roblox" and not self.dev_busy:
+            cmds = self.state.data.get("dev_apps", {})
+
+            def run():
+                try:
+                    started = self.dev_watchdog.check(cmds)
+                    if started:
+                        self.events.put(("dev_started", started))
+                finally:
+                    self.dev_busy = False
+            self.dev_busy = True
+            threading.Thread(target=run, daemon=True).start()
+        self.dev_job = self.root.after(30000, self.dev_tick)
 
     # ----------------------------- actions -------------------------------- #
     def ask_code(self, why):
@@ -776,6 +974,8 @@ class App:
                      else "Hors ligne (pas de compte)")
         if self.server_httpd:
             parts.append("Serveur ✔")
+        if self.dev_mode:
+            parts.append(f"Mode {devmode.MODES[self.dev_mode]} ✔")
         self.status.config(text="  •  ".join(parts))
 
     def test_black(self):
@@ -787,6 +987,7 @@ class App:
 
     def quit_app(self):
         if self.ask_code("Code pour quitter AntiScroll :"):
+            self.stop_dev()        # rend la veille normale au PC
             self.root.destroy()
 
     # --------------------------- écran noir ------------------------------- #
@@ -839,6 +1040,10 @@ class App:
                     self.after_sync()
                 elif kind == "app":
                     self.app_detected(payload)
+                elif kind == "dev_started":
+                    names = {k: n for k, n, _p in devmode.DEV_APPS}
+                    self.dev_info.config(text="Relancé : " + ", ".join(names[k] for k in payload)
+                                         + f" ({time.strftime('%H:%M')})")
         except queue.Empty:
             pass
         self.root.after(300, self.pump_events)
@@ -846,7 +1051,7 @@ class App:
     # ---------------------- apps installées (TikTok...) -------------------- #
     def watch_apps(self):
         while True:
-            time.sleep(3)
+            time.sleep(10 if self.dev_mode else 3)   # plus calme en mode dev
             if psutil is None or time.time() < self.app_ok_until:
                 continue
             watched = set(self.state.data.get("watched_apps", []))
