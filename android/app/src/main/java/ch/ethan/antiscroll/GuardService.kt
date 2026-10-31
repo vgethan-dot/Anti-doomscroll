@@ -8,6 +8,7 @@ import android.content.Context
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Rect
+import android.graphics.Typeface
 import android.media.AudioManager
 import android.os.Build
 import android.os.Handler
@@ -208,34 +209,51 @@ class GuardService : AccessibilityService() {
         val dp = resources.displayMetrics.density
         fun px(v: Int) = (v * dp).toInt()
 
+        // Fond noir opaque (fonctionnel) + carte blanche au centre
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
             setBackgroundColor(Color.BLACK)
-            setPadding(px(28), px(28), px(28), px(28))
+            setPadding(px(22), px(28), px(22), px(28))
             isClickable = true
         }
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            background = Ui.rounded(this@GuardService, Ui.CARD, 24, Ui.CYAN, 2)
+            setPadding(px(24), px(26), px(24), px(22))
+        }
+        root.addView(card, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         fun label(t: String, size: Float, color: Int) = TextView(this).apply {
             text = t; textSize = size; setTextColor(color); gravity = Gravity.CENTER
-            setPadding(0, px(6), 0, px(6))
+            setPadding(0, px(4), 0, px(4))
         }
-        root.addView(label(title, 26f, Color.WHITE))
-        root.addView(label(subtitle, 15f, Color.GRAY))
-        countdownView = if (countdown != null) label("", 20f, Color.rgb(127, 178, 255)).also { root.addView(it) } else null
+        card.addView(label("AntiScroll", 13f, Ui.CYAN_DARK).apply { setTypeface(null, Typeface.BOLD) })
+        card.addView(label(title, 25f, Ui.TEXT).apply { setTypeface(null, Typeface.BOLD) })
+        card.addView(label(subtitle, 15f, Ui.MUTED))
+        countdownView = if (countdown != null)
+            label("", 22f, Ui.CYAN_DARK).apply { setTypeface(null, Typeface.BOLD) }.also { card.addView(it) }
+        else null
         countdownEnd = countdown
 
         val hasCode = store.unlockRec() != null
         val input = EditText(this).apply {
             hint = "Code"
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-            setTextColor(Color.WHITE); setHintTextColor(Color.DKGRAY)
+            Ui.styleField(this)
+            textSize = 20f
             gravity = Gravity.CENTER
         }
-        val msg = label("", 14f, Color.rgb(255, 107, 107))
-        if (hasCode) root.addView(input, LinearLayout.LayoutParams(px(240), LinearLayout.LayoutParams.WRAP_CONTENT))
-        else root.addView(label("Aucun code choisi : ouvre l'app AntiScroll", 14f, Color.LTGRAY))
+        val msg = label("", 14f, Ui.RED)
+        val wide = LinearLayout.LayoutParams(px(260), LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = px(12) }
+        if (hasCode) card.addView(input, wide)
+        else card.addView(label("Aucun code choisi : ouvre l'app AntiScroll", 14f, Ui.MUTED))
 
-        val unlock = Button(this).apply { text = if (hasCode) "Débloquer" else "Continuer" }
+        val unlock = Button(this).apply {
+            text = if (hasCode) "Débloquer" else "Continuer"
+            Ui.styleButton(this, Ui.Kind.PRIMARY)
+        }
         unlock.setOnClickListener {
             val code = input.text.toString()
             input.setText("")
@@ -248,14 +266,15 @@ class GuardService : AccessibilityService() {
                 }
             }
         }
-        root.addView(unlock)
+        card.addView(unlock, LinearLayout.LayoutParams(px(260), LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = px(10) })
         if (leaveLabel != null) {
-            root.addView(Button(this).apply {
+            card.addView(Button(this).apply {
                 text = leaveLabel
+                Ui.styleButton(this, Ui.Kind.GHOST)
                 setOnClickListener { hideOverlay(); onLeave() }
-            })
+            }, LinearLayout.LayoutParams(px(260), LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = px(4) })
         }
-        root.addView(msg)
+        card.addView(msg)
 
         val lp = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,

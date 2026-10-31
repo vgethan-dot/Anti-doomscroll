@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Thème moderne : blanc + bleu cyan -->
+    <style name="AppTheme" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:colorPrimary">#06B6D4</item>
+        <item name="android:colorPrimaryDark">#0891B2</item>
+        <item name="android:colorAccent">#06B6D4</item>
+        <item name="android:statusBarColor">#0891B2</item>
+        <item name="android:windowBackground">#F4F9FB</item>
+        <item name="android:textColorPrimary">#0F172A</item>
+        <item name="android:textColorSecondary">#64748B</item>
+    </style>
+</resources>
